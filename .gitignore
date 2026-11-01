@@ -1,0 +1,27 @@
+# Build and output directories
+bin/
+obj/
+publish/
+
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+
+# Logs and runtime artifacts
+*.log
+logs/
+TestResults/
+*.db
+*.db-wal
+*.db-shm
+*.corrupt
+
+# OS-specific
+.DS_Store
+Thumbs.db
+

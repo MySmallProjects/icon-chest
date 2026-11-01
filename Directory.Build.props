@@ -1,0 +1,45 @@
+<Project>
+  <PropertyGroup>
+    <VersionMajor Condition="'$(VersionMajor)' == ''">0</VersionMajor>
+    <VersionMinor Condition="'$(VersionMinor)' == ''">1</VersionMinor>
+
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <NuGetAudit>false</NuGetAudit>
+
+    <_EpochDate>$([System.DateTime]::Parse("2024-01-01T00:00:00Z"))</_EpochDate>
+    <VersionBuild>$([System.Convert]::ToInt32($([System.Math]::Floor($([System.DateTime]::UtcNow.Subtract($(_EpochDate)).TotalDays)))))</VersionBuild>
+    <VersionRevision>$([System.Convert]::ToInt32($([System.Math]::Floor($([MSBuild]::Divide($([System.DateTime]::UtcNow.TimeOfDay.TotalSeconds), 2))))))</VersionRevision>
+    <BuildDateIso>$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</BuildDateIso>
+
+    <Version>$(VersionMajor).$(VersionMinor).$(VersionBuild).$(VersionRevision)</Version>
+    <AssemblyVersion>$(VersionMajor).$(VersionMinor).$(VersionBuild).$(VersionRevision)</AssemblyVersion>
+    <FileVersion>$(VersionMajor).$(VersionMinor).$(VersionBuild).$(VersionRevision)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+  </PropertyGroup>
+
+  <!-- Force assembly recompile when version changes -->
+  <Target Name="ForceVersionUpdateOnCompile" BeforeTargets="BeforeCompile">
+    <PropertyGroup>
+      <_VersionStampFile>$(IntermediateOutputPath)version.stamp</_VersionStampFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_VersionStampFile)" Lines="$(InformationalVersion)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <CustomAdditionalCompileInputs Include="$(_VersionStampFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Generate version.json for executables -->
+  <Target Name="GenerateVersionJson" AfterTargets="Build" Condition="'$(OutputType)' == 'Exe'">
+    <PropertyGroup>
+      <_VersionJsonPath>$(TargetDir)version.json</_VersionJsonPath>
+      <_VersionJsonContent>{
+  "version": "$(InformationalVersion)",
+  "buildDateUtc": "$(BuildDateIso)"
+}</_VersionJsonContent>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_VersionJsonPath)" Lines="$(_VersionJsonContent)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+</Project>
