@@ -238,6 +238,7 @@ app.MapFolderEndpoints();
 app.MapTreeEndpoints();
 app.MapTagEndpoints();
 app.MapImageEndpoints();
+app.MapQueryEndpoints();
 app.MapDuplicateEndpoints();
 app.MapMissingEndpoints();
 app.MapThumbnailEndpoints();

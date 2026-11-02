@@ -42,6 +42,7 @@ public static class Program
                 "image" => HandleImage(cmdArgs),
                 "thumbs" => await HandleThumbsAsync(cmdArgs),
                 "api" => await ApiCliCommands.HandleAsync(cmdArgs),
+                "query" => await QueryCliCommands.HandleAsync(cmdArgs),
                 _ => UnknownCommand(command)
             };
         }
@@ -83,6 +84,7 @@ public static class Program
         Console.WriteLine("  thumbs show <image id>               Display thumbnail state and paths for an image");
         Console.WriteLine("  thumbs make <file> --size N --out <path>  Render a single file for visual checking");
         Console.WriteLine("  api <login|get|post|patch|put|delete|events>  Interact with the running API daemon");
+        Console.WriteLine("  query validate|run|explain|docs      Advanced query language search tools");
     }
 
     private static int UnknownCommand(string command)

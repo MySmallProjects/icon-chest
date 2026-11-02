@@ -51,5 +51,23 @@ public static class EndpointHelpers
     {
         return ProblemDetails(context, StatusCodes.Status409Conflict, "Conflict", message);
     }
+
+    public static IResult QueryProblemDetails(
+        HttpContext context,
+        IReadOnlyList<IconChest.Core.Query.QueryError> queryErrors)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["traceId"] = context.TraceIdentifier,
+            ["queryErrors"] = queryErrors
+        };
+
+        return Results.Problem(
+            detail: "The query string contains validation or syntax errors.",
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Bad Request",
+            type: "https://tools.ietf.org/html/rfc7807#status-400",
+            extensions: extensions);
+    }
 }
 

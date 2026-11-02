@@ -81,11 +81,27 @@ public static class ImageEndpoints
                         "The 'q' parameter cannot be combined with structured filter parameters.");
                 }
 
-                return EndpointHelpers.ProblemDetails(
-                    context,
-                    StatusCodes.Status501NotImplemented,
-                    "Not Implemented",
-                    "Query language search via 'q' parameter is scheduled for Phase 5.");
+                var compResult = IconChest.Core.Query.QueryEngine.ParseAndCompile(qVal);
+                if (!compResult.IsValid)
+                {
+                    return EndpointHelpers.QueryProblemDetails(context, compResult.Errors);
+                }
+
+                var qRequest = new ImageSearchRequest
+                {
+                    Sort = sort ?? "filename",
+                    Dir = dir ?? "asc",
+                    Offset = offset ?? 0,
+                    Limit = limit ?? 50,
+                    CustomWhereClause = compResult.Query!.WhereSql,
+                    CustomWhereParameters = compResult.Query.Parameters.ToDictionary(k => k.Key, v => v.Value),
+                    Hidden = InclusionState.Include,
+                    Missing = InclusionState.Include,
+                    Duplicate = InclusionState.Include
+                };
+
+                var qResult = searchService.Search(qRequest);
+                return Results.Ok(qResult);
             }
 
             var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
@@ -168,11 +184,45 @@ public static class ImageEndpoints
 
             if (query.ContainsKey("q"))
             {
-                return EndpointHelpers.ProblemDetails(
-                    context,
-                    StatusCodes.Status501NotImplemented,
-                    "Not Implemented",
-                    "Query language search via 'q' parameter is scheduled for Phase 5.");
+                var qVal = query["q"].ToString();
+                bool hasOtherFilters = query.Keys.Any(k =>
+                    !k.Equals("q", StringComparison.OrdinalIgnoreCase) &&
+                    !k.Equals("limit", StringComparison.OrdinalIgnoreCase) &&
+                    !k.Equals("offset", StringComparison.OrdinalIgnoreCase) &&
+                    !k.Equals("sort", StringComparison.OrdinalIgnoreCase) &&
+                    !k.Equals("dir", StringComparison.OrdinalIgnoreCase));
+
+                if (hasOtherFilters)
+                {
+                    return EndpointHelpers.ProblemDetails(
+                        context,
+                        StatusCodes.Status400BadRequest,
+                        "Bad Request",
+                        "The 'q' parameter cannot be combined with structured filter parameters.");
+                }
+
+                var compResult = IconChest.Core.Query.QueryEngine.ParseAndCompile(qVal);
+                if (!compResult.IsValid)
+                {
+                    return EndpointHelpers.QueryProblemDetails(context, compResult.Errors);
+                }
+
+                int qMaxIds = limit ?? 200_000;
+                var qRequest = new ImageSearchRequest
+                {
+                    Sort = sort ?? "filename",
+                    Dir = dir ?? "asc",
+                    Offset = offset ?? 0,
+                    Limit = qMaxIds,
+                    CustomWhereClause = compResult.Query!.WhereSql,
+                    CustomWhereParameters = compResult.Query.Parameters.ToDictionary(k => k.Key, v => v.Value),
+                    Hidden = InclusionState.Include,
+                    Missing = InclusionState.Include,
+                    Duplicate = InclusionState.Include
+                };
+
+                var qIds = searchService.GetIds(qRequest, qMaxIds);
+                return Results.Ok(qIds);
             }
 
             var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();

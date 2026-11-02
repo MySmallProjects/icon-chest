@@ -1,3 +1,5 @@
+using System.Text;
+using IconChest.Core.Common;
 using Microsoft.Data.Sqlite;
 
 namespace IconChest.Core.Data;
@@ -44,6 +46,9 @@ public sealed class DatabaseConnectionFactory : IDatabaseConnectionFactory
         var connection = CreateConnection();
         connection.Open();
 
+        // Register custom deterministic SQLite functions for query language
+        RegisterFunctions(connection);
+
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = "PRAGMA foreign_keys = ON;";
@@ -58,5 +63,21 @@ public sealed class DatabaseConnectionFactory : IDatabaseConnectionFactory
 
         return connection;
     }
-}
 
+    public static void RegisterFunctions(SqliteConnection connection)
+    {
+        connection.CreateFunction("iq_eq", (string? a, string? b) =>
+        {
+            if (a is null && b is null) return true;
+            if (a is null || b is null) return false;
+            var normA = a.Normalize(NormalizationForm.FormC);
+            var normB = b.Normalize(NormalizationForm.FormC);
+            return string.Equals(normA, normB, StringComparison.InvariantCultureIgnoreCase);
+        }, isDeterministic: true);
+
+        connection.CreateFunction("iq_like", (string? value, string? pattern) =>
+        {
+            return WildcardMatcher.IsMatchWithEscapes(value, pattern);
+        }, isDeterministic: true);
+    }
+}

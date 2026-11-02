@@ -156,12 +156,17 @@ public class EndpointIntegrationTests
     }
 
     [Fact]
-    public async Task QueryLanguage_QParam_Returns501NotImplemented()
+    public async Task QueryLanguage_QParam_IsLiveInPhase5()
     {
         var client = await _factory.CreateAuthenticatedClientAsync();
-        var res = await client.GetAsync("/api/images?q=tag:icon");
 
-        Assert.Equal(HttpStatusCode.NotImplemented, res.StatusCode);
+        // Valid query returns 200 OK
+        var resOk = await client.GetAsync("/api/images?q=type%20%3D%3D%20png");
+        Assert.Equal(HttpStatusCode.OK, resOk.StatusCode);
+
+        // Invalid query returns 400 Bad Request
+        var resErr = await client.GetAsync("/api/images?q=tag:icon");
+        Assert.Equal(HttpStatusCode.BadRequest, resErr.StatusCode);
     }
 
     [Fact]

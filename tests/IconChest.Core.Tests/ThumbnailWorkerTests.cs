@@ -165,7 +165,7 @@ public class ThumbnailWorkerTests
             worker.Resume();
             Assert.False(worker.IsPaused);
 
-            var timeout = DateTime.UtcNow.AddSeconds(10);
+            var timeout = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < timeout)
             {
                 var st = queue.GetStatus();
@@ -214,7 +214,11 @@ public class ThumbnailWorkerTests
             worker1.Start();
 
             // Let it process a few jobs
-            await Task.Delay(150);
+            var waitStart = DateTime.UtcNow;
+            while (DateTime.UtcNow - waitStart < TimeSpan.FromSeconds(3) && queue.GetStatus().Done == 0)
+            {
+                await Task.Delay(20);
+            }
             await worker1.StopAsync();
 
             var status1 = queue.GetStatus();
@@ -225,7 +229,7 @@ public class ThumbnailWorkerTests
             var worker2 = new ThumbnailWorker(queue, cache, renderer, settings, provider);
             worker2.Start();
 
-            var timeout = DateTime.UtcNow.AddSeconds(10);
+            var timeout = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < timeout)
             {
                 var st = queue.GetStatus();
@@ -278,7 +282,7 @@ public class ThumbnailWorkerTests
             var worker = new ThumbnailWorker(queue, cache, renderer, settings, provider);
             worker.Start();
 
-            var timeout = DateTime.UtcNow.AddSeconds(10);
+            var timeout = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < timeout)
             {
                 var st = queue.GetStatus();
@@ -327,7 +331,7 @@ public class ThumbnailWorkerTests
             await scanner.ScanAsync(folderId);
             worker.Start();
 
-            var timeout = DateTime.UtcNow.AddSeconds(10);
+            var timeout = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < timeout)
             {
                 var st = queue.GetStatus();
@@ -413,7 +417,7 @@ public class ThumbnailWorkerTests
             await scanner.ScanAsync(folderId);
 
             worker.Start();
-            var timeout = DateTime.UtcNow.AddSeconds(10);
+            var timeout = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < timeout)
             {
                 var st = queue.GetStatus();

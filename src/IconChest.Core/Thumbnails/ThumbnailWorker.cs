@@ -127,6 +127,9 @@ public sealed class ThumbnailWorker : IThumbnailWorker
             _logger.LogWarning(ex, "Exception while awaiting thumbnail worker tasks completion.");
         }
 
+        // Recover any jobs that were left running when stopped
+        _queue.RecoverInterruptedJobs();
+
         _logger.LogInformation("ThumbnailWorker stopped.");
     }
 
@@ -223,14 +226,31 @@ public sealed class ThumbnailWorker : IThumbnailWorker
 
                 JobCompleted?.Invoke(job);
             }
+            catch (OperationCanceledException)
+            {
+                _queue.ResetToPending(job.Hash, job.Size);
+                return;
+            }
             catch (Exception ex)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    _queue.ResetToPending(job.Hash, job.Size);
+                    return;
+                }
+
                 _logger.LogWarning(ex, "Failed to write thumbnail cache file for ({Hash}, {Size}).", job.Hash, job.Size);
                 _queue.RecordAttemptFailure(job.Hash, job.Size, $"Cache write failure: {ex.Message}", isDeterministic: false);
             }
         }
         else
         {
+            if (cancellationToken.IsCancellationRequested || renderResult.ErrorMessage?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _queue.ResetToPending(job.Hash, job.Size);
+                return;
+            }
+
             bool isDeterministic = renderResult.Status is ThumbnailRenderStatus.Unreadable
                                    or ThumbnailRenderStatus.TooLarge
                                    or ThumbnailRenderStatus.Unsupported;

@@ -610,5 +610,94 @@ dotnet run --project src/IconChest.Cli -- api events --url http://127.0.0.1:5000
 
 
 
+Phase 5 - complete
+
+
+# IconChest Phase 5 Complete: The Query Language
+
+The hand-written four-stage search pipeline, API endpoints, CLI tooling, and documentation for *Phase 5: The Query Language* have been built, integrated, and verified with all 412 tests passing.
+
+Key Deliverables Implemented
+
+1. Four-Stage Query Pipeline (src/IconChest.Core/Query/)
+
+ - Lexer (QueryLexer.cs): Fast, non-allocating UTF-16 code unit position tracking, handles identifier quoting, escape sequences (\", \\, \*, \?), string literals, operators (==, !=, <, <=, >, >=, ~=, !~=), connectives (and, or, not), keywords (in, like, under), and reports exact character locations.
+ - Parser (QueryParser.cs): Hand-written recursive descent precedence parser (or < and < not < primary), enforcing syntax limits (max depth 20, max terms 200, max in-values 100, max pattern length 200) and reporting first syntax error fast.
+ - Validator (QueryValidator.cs): Semantic binder over all 20 fields (FieldRegistry.cs). Converts units (kb, mb, gb), date boundaries (UTC, leap years, timezone offsets, daylight savings), validates rating ranges (0-5), resolves boolean shorthand (transparent 
+→
+→ transparent == true), checks wildcard operators, and collects up to 10 semantic errors with typo suggestions (Levenshtein distance 
+≤
+2
+≤2).
+ - Compiler (QueryCompiler.cs): Compiles validated AST into parameterised SQL WHERE clauses (@q0, @q1, ...). Implements strict two-valued boolean logic (width != 100 includes rows with NULL dimensions), tags existence subqueries, folder under path queries, and implicit is_hidden = 0 AND is_missing = 0 filtering unless explicitly queried.
+ - Formatter (QueryFormatter.cs): Canonical printer with minimal parentheses: 
+Parse
+(
+Format
+(
+Parse
+(
+𝑥
+)
+)
+)
+=
+=
+Parse
+(
+𝑥
+)
+Parse(Format(Parse(x)))==Parse(x).
+ - Filter Converter (SimpleFilterToQuery.cs): Converts structured ImageSearchRequest into an equivalent query string, reporting any unsupported filters.
+ - Engine Facade (QueryEngine.cs): Single entry point for Validate and ParseAndCompile.
+
+
+2. Deterministic Custom SQLite Functions
+
+ - Registered iq_eq(a, b) (case- and accent-insensitive Unicode comparison) and iq_like(value, pattern) (delegating to WildcardMatcher with case/accent folding and wildcard escape awareness) via DatabaseConnectionFactory.
+
+3. Database Migration 0005_nullable_dimensions.sql
+
+ - Recreation migration permitting width and height to be NULL for unreadable or unsupported image files while maintaining all foreign keys and search indexes.
+
+4. HTTP Endpoints (src/IconChest.Api/Endpoints/QueryEndpoints.cs)
+
+ - GET /api/images?q=... & GET /api/images/ids?q=...: Connected to the query engine. Rejects mixing q with structured filters (400 ProblemDetails); returns RFC 7807 problem details with queryErrors when queries are invalid.
+ - POST /api/query/validate: Validates query text without executing, returning syntax and semantic errors.
+ - GET /api/query/help: Provides metadata on all fields, supported operators, types, aliases, and 30+ examples.
+ - POST /api/query/from-filter: Converts a structured filter payload into query text.
+
+5. Dev CLI Commands (src/IconChest.Cli/QueryCliCommands.cs)
+
+ - query validate "<query>" [--sql]: Validates queries with terminal caret error indicators.
+ - query run "<query>" [--sort <field>] [--dir asc|desc] [--limit <n>]: Executes queries directly and formats matches.
+ - query explain "<query>": Dumps the untyped AST, compiled SQL, parameters, and SQLite EXPLAIN QUERY PLAN.
+ - query docs [--write]: Outputs or writes docs/QUERY-LANGUAGE.md.
+
+6. Generated Reference Documentation
+
+ - docs/QUERY-LANGUAGE.md generated directly from the codebase definitions and locked by golden unit tests.
+
+
+Test Suite Verification
+
+All 412 tests across the entire solution are passing cleanly (0 failures, 0 skipped):
+
+ - IconChest.Core.Tests: 369 passed (including 203 new query language unit, semantic, fuzz, date, benchmark, and golden tests).
+ - IconChest.Api.Tests: 43 passed (including query endpoint integration tests).
+
+
+
+
+
+
+
+----
+
+
+
+
+
+
 
 
