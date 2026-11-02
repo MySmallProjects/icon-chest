@@ -1,0 +1,255 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using IconChest.Api.Security;
+using IconChest.Core.Common;
+using IconChest.Core.Data;
+using IconChest.Core.Logging;
+using IconChest.Core.Security;
+using IconChest.Core.Settings;
+using IconChest.Core.Thumbnails;
+using IconChest.Core.Versioning;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Hosting;
+
+namespace IconChest.Api.Endpoints;
+
+public sealed record LanPasswordRequest(
+    [property: JsonPropertyName("currentPassword")] string? CurrentPassword,
+    [property: JsonPropertyName("newPassword")] string NewPassword);
+
+public static class SystemEndpoints
+{
+    public static void MapSystemEndpoints(
+        this IEndpointRouteBuilder app,
+        int boundPort,
+        IIconChestDatabase database)
+    {
+        // 1. GET /health (Anonymous)
+        app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
+            .WithTags("Health")
+            .WithSummary("Health check");
+
+        var group = app.MapGroup("/api").WithTags("System");
+
+        // 2. GET /api/system/info
+        group.MapGet("/system/info", (
+            HttpContext context,
+            ISettingsService settingsService) =>
+        {
+            var versionInfo = new VersionInfo();
+            var paths = settingsService.Paths;
+            var todayLogFile = Path.Combine(paths.DefaultLogDirectory, $"app-{DateTime.UtcNow:yyyyMMdd}.log");
+
+            return Results.Ok(new
+            {
+                version = versionInfo.Version,
+                buildDateUtc = versionInfo.BuildDateUtc?.ToString("o"),
+                executablePath = Environment.ProcessPath ?? string.Empty,
+                logFilePath = todayLogFile,
+                logFolder = paths.DefaultLogDirectory,
+                platform = RuntimeInformation.OSDescription,
+                apiPort = boundPort,
+                dbPath = database.DatabasePath,
+                schemaVersion = database.GetSchemaVersion(),
+                hashAlgorithm = "xxh128",
+                isLocal = context.IsLoopback()
+            });
+        })
+        .WithName("GetSystemInfo")
+        .WithSummary("System and environment diagnostics info");
+
+        // 3. POST /api/system/shutdown (Loopback only)
+        group.MapPost("/system/shutdown", (
+            HttpContext context,
+            IHostApplicationLifetime appLifetime) =>
+        {
+            if (!context.IsLoopback())
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status403Forbidden,
+                    "Forbidden",
+                    "Shutdown can only be triggered from loopback connections.");
+            }
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(200);
+                appLifetime.StopApplication();
+            });
+
+            return Results.Ok(new { status = "shutting_down" });
+        })
+        .WithName("Shutdown")
+        .WithSummary("Initiates graceful shutdown of the API host (loopback only)");
+
+        // 4. GET /api/settings
+        group.MapGet("/settings", (ISettingsService settingsService) =>
+        {
+            var s = settingsService.Current;
+            return Results.Ok(new
+            {
+                version = s.Version,
+                dbPath = s.DbPath,
+                thumbnailCachePath = s.ThumbnailCachePath,
+                thumbnailCacheMaxMb = s.ThumbnailCacheMaxMb,
+                thumbnailQuality = s.ThumbnailQuality,
+                thumbnailWorkers = s.ThumbnailWorkers,
+                logLevel = s.LogLevel.ToString(),
+                theme = s.Theme.ToString(),
+                gridCaption = s.GridCaption.ToString(),
+                checkerboardMode = s.CheckerboardMode.ToString(),
+                previewInfoOverlayDefault = s.PreviewInfoOverlayDefault,
+                defaultView = s.DefaultView,
+                rememberWindowState = s.RememberWindowState,
+                window = s.Window,
+                includePatterns = s.IncludePatterns,
+                excludeNames = s.ExcludeNames,
+                scanOnStartup = s.ScanOnStartup,
+                scanWorkers = s.ScanWorkers,
+                autoRemoveMissing = s.AutoRemoveMissing,
+                confirmBeforeDelete = s.ConfirmBeforeDelete,
+                api = new
+                {
+                    portPreference = s.Api.PortPreference,
+                    allowLan = s.Api.AllowLan,
+                    hasLanPassword = !string.IsNullOrWhiteSpace(s.Api.LanPasswordHash)
+                }
+            });
+        })
+        .WithName("GetSettings")
+        .WithSummary("Gets all application settings (hides password hash)");
+
+        // 5. PATCH /api/settings
+        group.MapPatch("/settings", (
+            HttpContext context,
+            JsonElement patchBody,
+            ISettingsService settingsService,
+            IThumbnailWorker thumbnailWorker) =>
+        {
+            try
+            {
+                var (newSettings, restartRequired) = SettingsPatchHelper.ApplyPatch(settingsService.Current, patchBody);
+
+                int oldWorkers = settingsService.Current.ThumbnailWorkers;
+
+                settingsService.Update(s =>
+                {
+                    s.DbPath = newSettings.DbPath;
+                    s.ThumbnailCachePath = newSettings.ThumbnailCachePath;
+                    s.ThumbnailCacheMaxMb = newSettings.ThumbnailCacheMaxMb;
+                    s.ThumbnailQuality = newSettings.ThumbnailQuality;
+                    s.ThumbnailWorkers = newSettings.ThumbnailWorkers;
+                    s.LogLevel = newSettings.LogLevel;
+                    s.Theme = newSettings.Theme;
+                    s.GridCaption = newSettings.GridCaption;
+                    s.CheckerboardMode = newSettings.CheckerboardMode;
+                    s.PreviewInfoOverlayDefault = newSettings.PreviewInfoOverlayDefault;
+                    s.DefaultView = newSettings.DefaultView;
+                    s.RememberWindowState = newSettings.RememberWindowState;
+                    s.Window = newSettings.Window;
+                    s.IncludePatterns = newSettings.IncludePatterns;
+                    s.ExcludeNames = newSettings.ExcludeNames;
+                    s.ScanOnStartup = newSettings.ScanOnStartup;
+                    s.ScanWorkers = newSettings.ScanWorkers;
+                    s.AutoRemoveMissing = newSettings.AutoRemoveMissing;
+                    s.ConfirmBeforeDelete = newSettings.ConfirmBeforeDelete;
+                    s.Api.PortPreference = newSettings.Api.PortPreference;
+                    s.Api.AllowLan = newSettings.Api.AllowLan;
+                });
+
+                // If thumbnail workers changed, restart workers
+                if (oldWorkers != newSettings.ThumbnailWorkers)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        await thumbnailWorker.StopAsync();
+                        thumbnailWorker.Start();
+                    });
+                }
+
+                var s = settingsService.Current;
+                return Results.Ok(new
+                {
+                    settings = new
+                    {
+                        version = s.Version,
+                        dbPath = s.DbPath,
+                        thumbnailCachePath = s.ThumbnailCachePath,
+                        thumbnailCacheMaxMb = s.ThumbnailCacheMaxMb,
+                        thumbnailQuality = s.ThumbnailQuality,
+                        thumbnailWorkers = s.ThumbnailWorkers,
+                        logLevel = s.LogLevel.ToString(),
+                        theme = s.Theme.ToString(),
+                        gridCaption = s.GridCaption.ToString(),
+                        checkerboardMode = s.CheckerboardMode.ToString(),
+                        previewInfoOverlayDefault = s.PreviewInfoOverlayDefault,
+                        defaultView = s.DefaultView,
+                        rememberWindowState = s.RememberWindowState,
+                        window = s.Window,
+                        includePatterns = s.IncludePatterns,
+                        excludeNames = s.ExcludeNames,
+                        scanOnStartup = s.ScanOnStartup,
+                        scanWorkers = s.ScanWorkers,
+                        autoRemoveMissing = s.AutoRemoveMissing,
+                        confirmBeforeDelete = s.ConfirmBeforeDelete,
+                        api = new
+                        {
+                            portPreference = s.Api.PortPreference,
+                            allowLan = s.Api.AllowLan,
+                            hasLanPassword = !string.IsNullOrWhiteSpace(s.Api.LanPasswordHash)
+                        }
+                    },
+                    restartRequired = restartRequired
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointHelpers.ValidationError(context, "settings", ex.Message);
+            }
+        })
+        .WithName("PatchSettings")
+        .WithSummary("Applies a JSON merge patch to application settings");
+
+        // 6. PUT /api/settings/lan-password
+        group.MapPut("/settings/lan-password", (
+            HttpContext context,
+            LanPasswordRequest request,
+            ISettingsService settingsService) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
+            {
+                return EndpointHelpers.ValidationError(context, "newPassword", "LAN password must be at least 8 characters.");
+            }
+
+            var currentHash = settingsService.Current.Api.LanPasswordHash;
+            if (!string.IsNullOrWhiteSpace(currentHash))
+            {
+                if (string.IsNullOrWhiteSpace(request.CurrentPassword) ||
+                    !PasswordHasher.VerifyPassword(request.CurrentPassword, currentHash))
+                {
+                    return EndpointHelpers.ProblemDetails(
+                        context,
+                        StatusCodes.Status400BadRequest,
+                        "Bad Request",
+                        "Current password is incorrect.");
+                }
+            }
+
+            var newHash = PasswordHasher.HashPassword(request.NewPassword);
+            settingsService.Update(s => s.Api.LanPasswordHash = newHash);
+
+            return Results.Ok(new
+            {
+                status = "password_updated",
+                hasLanPassword = true
+            });
+        })
+        .WithName("SetLanPassword")
+        .WithSummary("Sets or updates the LAN password (requires current password if already set)");
+    }
+}

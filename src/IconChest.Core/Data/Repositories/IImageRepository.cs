@@ -20,5 +20,6 @@ public interface IImageRepository
     IReadOnlyList<ImageRecord> List(long? folderId = null, bool includeHidden = false, bool includeMissing = false, bool duplicatesOnly = false, int limit = 50, int offset = 0);
     int Count(long? folderId = null, bool includeHidden = false, bool includeMissing = false, bool duplicatesOnly = false);
     DatabaseStats GetStats();
+    IReadOnlyList<long> GetTagIdsForImage(long imageId);
 }
 

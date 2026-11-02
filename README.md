@@ -197,7 +197,30 @@ iconchest settings set thumbnailQuality 90
 iconchest settings set thumbnailWorkers 4
 ```
 
-### 7. Logging and Diagnostics
+### 7. API CLI Client Operations
+Authenticate with a running IconChest API and save session cookie to `~/.iconchest_cli_session`:
+```bash
+iconchest api login [--secret <secret>] [--password <pass>] [--url http://127.0.0.1:<port>]
+```
+
+Execute authenticated API requests against the running instance:
+```bash
+iconchest api get /api/system/info
+iconchest api get /api/folders
+iconchest api post /api/folders '{"path":"/path/to/icons"}'
+iconchest api patch /api/folders/1 '{"enabled":false}'
+iconchest api delete /api/folders/1
+iconchest api get /api/images
+iconchest api get /api/tree/folders
+iconchest api get /api/tree/years
+```
+
+Listen to live Server-Sent Events (SSE) from `/api/events`:
+```bash
+iconchest api events
+```
+
+### 8. Logging and Diagnostics
 Print version info:
 ```bash
 iconchest version
@@ -207,6 +230,38 @@ Test logging output across levels:
 ```bash
 iconchest log-test --level Information
 ```
+
+---
+
+## IconChest API & Child-Process Contract
+
+The API is built to be run either standalone or as a child process of the desktop shell (Photino.NET in Phase 6).
+
+### Configuration & Arguments
+* `--port N`: Listen port. Default is `0` (or `api.portPreference` from `settings.json`), binding to an ephemeral free port.
+* `--parent-pid N`: Process ID of parent desktop shell. The API monitors this process every 2 seconds and initiates graceful shutdown if the parent process exits.
+* `--swagger`: Forces Swagger UI to be enabled even in Production mode.
+* `ICONCHEST_API_SECRET`: Optional environment variable providing the session secret. If not set, a cryptographically secure 256-bit random URL-safe base64 string is generated on startup and printed once to stdout.
+
+### Readiness Protocol
+Upon successfully binding to Kestrel, the API emits a single line to standard output:
+```text
+ICONCHEST_READY http://127.0.0.1:<port>
+```
+The desktop host monitors stdout for this line before loading the webview.
+
+### Security Invariants
+* **DNS Rebinding Protection:** The API validates the `Host` header against loopback (`127.0.0.1`, `localhost`, `[::1]`) and the host machine's LAN IP addresses if LAN binding is active. Foreign host headers are rejected with `400 Bad Request`.
+* **Cross-Site Request Forgery (CSRF) & Origin Defense:** Non-GET requests with foreign `Origin` headers are rejected with `403 Forbidden`.
+* **Content Security Policy:** Strict CSP applied (`default-src 'self'`). Original SVG files served at `/api/images/{id}/file` include a strict sandbox CSP (`default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox`) preventing script execution.
+* **Authentication & Throttling:**
+  * Secret authentication via loopback only.
+  * LAN authentication requires `api.allowLan = true` and a password hash (PBKDF2-SHA256 >= 600,000 iterations).
+  * Sliding 24-hour sessions via `iconchest_session` cookie (`SameSite=Strict`, `HttpOnly`).
+  * Throttling: 5 failed login attempts per IP per minute triggers `429 Too Many Requests` with exponential `Retry-After` headers (60s, 120s, 300s). Successful login resets the counter.
+* **Secrets Invariant:** Session secrets, passwords, cookies, and authentication payloads are strictly excluded from logging.
+
+---
 
 ### Environment Variable Overrides
 To isolate configurations and data paths during development or testing, use:

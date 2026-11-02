@@ -392,5 +392,11 @@ public sealed class ImageRepository : IImageRepository
 
         return new DatabaseStats(folders, images, missing, hidden, duplicates, tags);
     }
+
+    public IReadOnlyList<long> GetTagIdsForImage(long imageId)
+    {
+        using var conn = _connectionFactory.CreateAndOpenConnection();
+        return conn.Query<long>("SELECT tag_id FROM image_tag WHERE image_id = @imageId ORDER BY tag_id ASC;", new { imageId }).ToList();
+    }
 }
 

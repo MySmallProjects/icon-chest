@@ -91,3 +91,9 @@ IconChest incorporates open-source software. Below is a list of third-party libr
 - **License:** MIT
 - **URL:** https://github.com/dotnet/runtime
 - **Notice:** Copyright (c) .NET Foundation and Contributors. All rights reserved. Licensed under the MIT License.
+
+### Swashbuckle.AspNetCore (SwaggerGen & SwaggerUI)
+- **Version:** 6.6.2
+- **License:** MIT
+- **URL:** https://github.com/domaindrivendev/Swashbuckle.AspNetCore
+- **Notice:** Copyright (c) 2016-2024 Richard Morris. Licensed under the MIT License.

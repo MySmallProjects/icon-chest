@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace IconChest.Core.Thumbnails;
 
-public sealed class ThumbnailWorker : IAsyncDisposable, IDisposable
+public sealed class ThumbnailWorker : IThumbnailWorker
 {
     private readonly IThumbnailQueue _queue;
     private readonly IThumbnailCache _cache;
