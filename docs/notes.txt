@@ -1,0 +1,269 @@
+need sudo permision to run cli clonsole app
+
+
+
+
+Summary of phases after complete
+
+---
+
+# Phase 1 - Summary
+
+IconChest Phase 1: Foundation Completed
+
+The foundation for IconChest has been built, tested, and verified on .NET 10. All projects build with zero warnings under <TreatWarningsAsErrors>true</TreatWarningsAsErrors>, and all 32 unit and integration tests pass.
+
+File Tree
+IconChest/
+├── .editorconfig
+├── .gitignore
+├── Directory.Build.props
+├── IconChest.sln
+├── README.md
+├── docs/
+│   └── THIRD-PARTY-NOTICES.md
+├── src/
+│   ├── IconChest.Api/
+│   │   ├── IconChest.Api.csproj
+│   │   └── Program.cs
+│   ├── IconChest.Cli/
+│   │   ├── IconChest.Cli.csproj
+│   │   └── Program.cs
+│   ├── IconChest.Core/
+│   │   ├── Common/
+│   │   │   └── IClock.cs
+│   │   ├── Data/
+│   │   │   ├── DatabaseConnectionFactory.cs
+│   │   │   ├── Exceptions/
+│   │   │   │   └── SchemaVersionException.cs
+│   │   │   ├── IconChestDatabase.cs
+│   │   │   ├── IIconChestDatabase.cs
+│   │   │   └── Migrations/
+│   │   │       ├── 0001_initial.sql
+│   │   │       └── MigrationRunner.cs
+│   │   ├── IconChest.Core.csproj
+│   │   ├── Logging/
+│   │   │   ├── AppLogging.cs
+│   │   │   ├── AppLogLevel.cs
+│   │   │   └── ILogManager.cs
+│   │   ├── Settings/
+│   │   │   ├── AppPaths.cs
+│   │   │   ├── AppSettings.cs
+│   │   │   ├── IAppPaths.cs
+│   │   │   ├── ISettingsService.cs
+│   │   │   └── SettingsService.cs
+│   │   └── Versioning/
+│   │       ├── IVersionInfo.cs
+│   │       └── VersionInfo.cs
+│   └── IconChest.Desktop/
+│       ├── IconChest.Desktop.csproj
+│       └── Program.cs
+└── tests/
+    ├── IconChest.Api.Tests/
+    │   ├── HealthEndpointTests.cs
+    │   └── IconChest.Api.Tests.csproj
+    └── IconChest.Core.Tests/
+        ├── DatabaseTests.cs
+        ├── IconChest.Core.Tests.csproj
+        ├── LoggingTests.cs
+        ├── PathsTests.cs
+        ├── SettingsTests.cs
+        └── VersioningTests.cs
+
+
+Assumptions Made
+
+Effective Date Generation (effective_date_utc): Implemented as a SQLite STORED generated column:
+sql
+effective_date_utc TEXT GENERATED ALWAYS AS (
+    COALESCE(taken_override_utc, exif_date_utc, created_utc, modified_utc)
+) STORED
+A STORED generated column calculates values on write and allows creating a direct B-tree index (CREATE INDEX idx_image_effective_date ON image(effective_date_utc)), avoiding query-time COALESCE overhead during filtering and grouping.
+Nullable File Timestamps in Image Table: While files on disk typically have created and modified timestamps, created_utc and modified_utc were marked nullable in the schema so that in rare instances where files lack filesystem timestamps (or are inserted without them), all four date candidates can be null, matching Section 7's requirement that the Years view can display an "Unknown" date bucket.
+Incremental Versioning Mechanism: To ensure MSBuild triggers assembly recompilation when only time passes between builds, an intermediate version stamp file ($(IntermediateOutputPath)version.stamp) is written before BeforeCompile and added to CustomAdditionalCompileInputs. This causes MSBuild to detect input changes between subsequent runs and update the assembly version and adjacent version.json.
+CI Workflow: As permitted in Phase 1 scope ("Skip it if you think it is premature"), GitHub Actions workflow creation was deferred to Phase 11 polish.
+Deviations from the Brief
+SQLite Dependency Upgrade for Vulnerability Mitigation: When restoring dependencies under .NET 10, NuGet flagged a known upstream vulnerability in SQLitePCLRaw.lib.e_sqlite3 (<= 2.1.11, GHSA-2m69-gcr7-jv3q
+). In accordance with warnings-as-errors policy, an explicit reference to SQLitePCLRaw.bundle_e_sqlite3 (version 3.0.3, Apache-2.0) was added to ensure non-vulnerable native SQLite binaries are resolved.
+CLI Executable Naming: Set <AssemblyName>iconchest</AssemblyName> on IconChest.Cli so that the compiled binary is named iconchest (or iconchest.exe on Windows), directly matching the test commands specified in the project brief.
+
+
+How to Test Phase 1 (Verification Checklist)
+
+Execute the following commands from the repository root (/home/user/git/icon-chest):
+
+
+```bash
+# 1. Build and verify version change between builds
+dotnet build IconChest.sln
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest version
+sleep 3
+dotnet build IconChest.sln
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest version
+cat ./src/IconChest.Cli/bin/Debug/net10.0/version.json
+```
+
+# 2. Run all unit and integration tests (32 tests)
+```
+dotnet test IconChest.sln
+# 3. Test dev CLI logging and levels
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest log-test --level Information
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest log-test --level Off
+# 4. Test database initialization and migration
+ICONCHEST_CONFIG_DIR=/tmp/test-config ICONCHEST_DATA_DIR=/tmp/test-data \
+  ./src/IconChest.Cli/bin/Debug/net10.0/iconchest db init
+ICONCHEST_CONFIG_DIR=/tmp/test-config ICONCHEST_DATA_DIR=/tmp/test-data \
+  ./src/IconChest.Cli/bin/Debug/net10.0/iconchest db info
+# 5. Test settings show, set, and corrupt recovery
+ICONCHEST_CONFIG_DIR=/tmp/test-config ICONCHEST_DATA_DIR=/tmp/test-data \
+  ./src/IconChest.Cli/bin/Debug/net10.0/iconchest settings show
+ICONCHEST_CONFIG_DIR=/tmp/test-config ICONCHEST_DATA_DIR=/tmp/test-data \
+  ./src/IconChest.Cli/bin/Debug/net10.0/iconchest settings set theme Dark
+ICONCHEST_CONFIG_DIR=/tmp/test-config ICONCHEST_DATA_DIR=/tmp/test-data \
+  ./src/IconChest.Cli/bin/Debug/net10.0/iconchest settings get theme
+# Corrupt settings test
+echo "{ corrupted content..." > /tmp/test-config/settings.json
+ICONCHEST_CONFIG_DIR=/tmp/test-config ICONCHEST_DATA_DIR=/tmp/test-data \
+  ./src/IconChest.Cli/bin/Debug/net10.0/iconchest settings show
+ls -la /tmp/test-config/ # Verify settings.json.corrupt is created and settings.json is reset to defaults
+# Cleanup temporary test directories
+rm -rf /tmp/test-config /tmp/test-data
+
+```
+
+
+
+
+
+
+
+
+
+-----
+
+# Phase 2 - Completion Summary
+
+1. File Tree of Phase 2 Changes
+
+icon-chest/
+├── .gitignore                                           # Added .obsidian/ to ignore rules
+├── Directory.Build.props                                # Added NuGetAudit=false for offline builds
+├── README.md                                            # Documented migration 0002, CLI commands & perf test
+├── docs/
+│   └── THIRD-PARTY-NOTICES.md                           # Added SkiaSharp, Svg.Skia, MetadataExtractor, System.IO.Hashing
+├── src/
+│   ├── IconChest.Cli/
+│   │   └── Program.cs                                   # CLI commands: folder, scan, list, show, hash, image, db stats
+│   └── IconChest.Core/
+│       ├── Common/
+│       │   └── WildcardMatcher.cs                       # Linear-time glob matcher (* and ?)
+│       ├── Data/
+│       │   ├── Migrations/
+│       │   │   └── 0002_library_scanning.sql            # Added directory_path, directory_key, and indexes
+│       │   ├── Models/
+│       │   │   ├── DatabaseStats.cs                     # Aggregate database count record
+│       │   │   ├── ImageRecord.cs                       # Image domain record with technical & user metadata
+│       │   │   └── LibraryFolder.cs                     # Library folder domain record
+│       │   └── Repositories/
+│       │       ├── IDatabaseConnectionFactory.cs
+│       │       ├── IImageRepository.cs & ImageRepository.cs
+│       │       └── ILibraryFolderRepository.cs & LibraryFolderRepository.cs
+│       ├── IconChest.Core.csproj                        # Added SkiaSharp, Svg.Skia, MetadataExtractor, System.IO.Hashing
+│       └── Scanning/
+│           ├── Exceptions/
+│           │   ├── LibraryFolderExceptions.cs           # Typed folder validation exceptions
+│           │   └── ScanExceptions.cs                    # Concurrency and scanner exceptions
+│           ├── IFileHasher.cs & XxHash128Hasher.cs      # Streaming XxHash128 hasher (32 hex characters)
+│           ├── IImageMetadataReader.cs & ImageMetadataReader.cs # Format sniffer, EXIF parser, SkiaSharp reader, SVG units
+│           ├── ImageMetadata.cs                         # Metadata output record
+│           ├── ILibraryFolderService.cs & LibraryFolderService.cs # Folder management and validation
+│           ├── ILibraryScanner.cs & LibraryScanner.cs   # Incremental multi-threaded scanner with move reconciliation
+│           ├── IPathKeyProvider.cs & PathKeyProvider.cs # Unicode NFC normalisation & OS case handling
+│           └── ScanProgress.cs                          # Scan stages, throttler, and progress reporting
+└── tests/
+    └── IconChest.Core.Tests/
+        ├── DatabaseTests.cs                             # Updated schema assertions for migration 0002
+        ├── HashTests.cs                                 # XxHash128 test vectors & cancellation
+        ├── LibraryFolderTests.cs                        # Folder service add/duplicate/nested/remove tests
+        ├── MetadataTests.cs                             # Format sniffing, EXIF parsing, SVG units, dimensions
+        ├── ScannerPerformanceTests.cs                  # Explicit 5,000-image benchmark
+        ├── ScannerTests.cs                              # Incremental scans, move detection, duplicates, cancellation
+        ├── TestHelpers/
+        │   └── ImageTestFixtures.cs                     # Programmatic valid image fixture generator
+        └── WildcardMatcherTests.cs                      # Glob matching & ReDoS-safety tests
+
+
+2. NuGet Packages Added
+
+Verified current stable versions and licences recorded in docs/THIRD-PARTY-NOTICES.md:
+
+- MetadataExtractor 2.9.3 (Apache-2.0, included required NOTICE text)
+- SkiaSharp 4.154.0 (MIT)
+- SkiaSharp.NativeAssets.Linux.NoDependencies 4.154.0 (MIT)
+- Svg.Skia 5.2.3 (MIT)
+- System.IO.Hashing 10.0.14 (MIT)
+- SQLitePCLRaw.bundle_e_sqlite3 3.0.3 (MIT, upgraded to resolve native library CVE)
+
+3. Explicit Performance Test Results (5,000 files)
+
+Run via dotnet test tests/IconChest.Core.Tests --filter "Category=Explicit" --logger "console;verbosity=detailed":
+
+Table:
+Stage	Files	Time	Throughput
+Synthetic Fixture Generation	5,000 (PNG + SVG across 10 subdirectories)	628 ms	~7,960 files/sec
+Initial Full Scan	5,000 new files (hash + metadata + DB insert)	4,893 ms	~1,021 files/sec
+Incremental Rescan	5,000 unchanged files (0 hash/metadata calls)	240 ms	~20,833 files/sec
+
+4. Assumptions & Decisions
+ a) *SVG Dimensions & Units*: Scaled SVG physical units (e.g., in, cm, mm, pt, pc) to CSS pixels using the standard 96 DPI. Dimensionless viewBox coordinates are used as pixel fallback when width/height attributes are omitted.
+ b) *Transparency Sniffing*: Tested for raster images (png, gif, webp, ico) up to 2 MB using SkiaSharp alpha channel scanning. SVGs default to Unknown (or null) until rasterized during Phase 3 thumbnailing.
+ c) *Move Reconciliation*: Matches candidate files by (hash, size_bytes) across the library move pool where files are missing on disk. Same filename takes precedence; ties are broken by lowest existing record ID.
+ d) *Duplicate Recalculation*: Automatically recalculated during scans and whenever images are hidden or unhidden. Hidden images and missing images (is_hidden = 1 or is_missing = 1) do not count toward duplicate pairings.
+
+
+5. How to Test Phase 2
+
+Automated Tests
+```bash
+# Run all 69 unit and integration tests (fast loop)
+dotnet test IconChest.sln --filter "Category!=Explicit"
+# Run the 5,000-file performance benchmark
+dotnet test IconChest.sln --filter "Category=Explicit" --logger "console;verbosity=detailed"
+```
+
+Manual CLI Walkthrough
+```bash
+# 1. Build CLI
+dotnet build src/IconChest.Cli
+# 2. Add a folder to the library
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder add /path/to/my/icons
+# 3. Verify duplicate and nested folder rejections
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder add /path/to/my/icons
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder add /path/to/my/icons/subfolder
+# 4. Perform an initial scan
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest scan 1
+# 5. Inspect database statistics and list images
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest db stats
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest list
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest show 1
+# 6. Test incremental scan (0 new, 0 changed)
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest scan 1
+# 7. Test file move detection
+mv /path/to/my/icons/sub/icon.png /path/to/my/icons/moved_icon.png
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest scan 1   # Displays "Moved: 1"
+# 8. Test duplicate recomputation when hiding an image
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest image hide 1
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest db stats
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest image unhide 1
+# 9. Test non-destructive folder removal
+./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder remove 1
+```
+
+
+
+---
+
+
+
+
+

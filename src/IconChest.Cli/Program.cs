@@ -1,7 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
+using IconChest.Core.Common;
 using IconChest.Core.Data;
+using IconChest.Core.Data.Models;
+using IconChest.Core.Data.Repositories;
 using IconChest.Core.Logging;
+using IconChest.Core.Scanning;
 using IconChest.Core.Settings;
 using IconChest.Core.Versioning;
 using Microsoft.Extensions.Logging;
@@ -10,7 +14,7 @@ namespace IconChest.Cli;
 
 public static class Program
 {
-    public static int Main(string[] args)
+    public static async Task<int> Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
         {
@@ -29,6 +33,12 @@ public static class Program
                 "log-test" => HandleLogTest(cmdArgs),
                 "settings" => HandleSettings(cmdArgs),
                 "db" => HandleDb(cmdArgs),
+                "folder" => HandleFolder(cmdArgs),
+                "scan" => await HandleScanAsync(cmdArgs),
+                "list" => HandleList(cmdArgs),
+                "show" => HandleShow(cmdArgs),
+                "hash" => await HandleHashAsync(cmdArgs),
+                "image" => HandleImage(cmdArgs),
                 _ => UnknownCommand(command)
             };
         }
@@ -48,13 +58,18 @@ public static class Program
         Console.WriteLine("Usage: iconchest <command> [options]");
         Console.WriteLine();
         Console.WriteLine("Commands:");
-        Console.WriteLine("  version                       Print version, build date, and executable path");
-        Console.WriteLine("  log-test [--level <level>]    Write messages at each level and report filtering");
-        Console.WriteLine("  settings show                 Display current application settings");
-        Console.WriteLine("  settings get <key>            Display value of a setting key");
-        Console.WriteLine("  settings set <key> <value>    Update value of a setting key");
-        Console.WriteLine("  db init                       Create or migrate database to latest schema");
-        Console.WriteLine("  db info                       Print database path and current schema version");
+        Console.WriteLine("  version                              Print version, build date, and executable path");
+        Console.WriteLine("  log-test [--level <level>]           Write messages at each level and report filtering");
+        Console.WriteLine("  settings show|get|set                Manage application settings");
+        Console.WriteLine("  db init|info|stats                   Manage SQLite database and view statistics");
+        Console.WriteLine("  folder add <path>                    Add a directory to the library");
+        Console.WriteLine("  folder list                          List library folders and file counts");
+        Console.WriteLine("  folder remove <id or path> [--yes]   Remove a folder from the library");
+        Console.WriteLine("  scan <id or path> | scan --all       Scan library folder(s) with live progress");
+        Console.WriteLine("  list [--folder id] [--hidden]...     List indexed images in a table");
+        Console.WriteLine("  show <image id>                      Display all metadata and EXIF for an image");
+        Console.WriteLine("  hash <file>                          Compute XxHash128 for any file");
+        Console.WriteLine("  image hide|unhide <id>               Toggle hidden state of an image");
     }
 
     private static int UnknownCommand(string command)
@@ -64,6 +79,20 @@ public static class Program
         Console.ResetColor();
         PrintUsage();
         return 1;
+    }
+
+    private static (IconChestDatabase Db, LibraryFolderRepository FolderRepo, ImageRepository ImageRepo, SettingsService Settings) CreateContext()
+    {
+        var paths = new AppPaths();
+        var settingsService = new SettingsService(paths);
+        var db = new IconChestDatabase(settingsService);
+        db.Migrate();
+
+        var connFactory = new DatabaseConnectionFactory(db.DatabasePath);
+        var folderRepo = new LibraryFolderRepository(connFactory);
+        var imageRepo = new ImageRepository(connFactory);
+
+        return (db, folderRepo, imageRepo, settingsService);
     }
 
     private static int HandleVersion()
@@ -85,7 +114,7 @@ public static class Program
             {
                 if (!Enum.TryParse(args[i + 1], ignoreCase: true, out level))
                 {
-                    Console.Error.WriteLine($"Invalid log level '{args[i + 1]}'. Allowed values: Off, Error, Warning, Information, Debug, Trace.");
+                    Console.Error.WriteLine($"Invalid log level '{args[i + 1]}'.");
                     return 1;
                 }
                 i++;
@@ -289,14 +318,12 @@ public static class Program
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("Missing db subcommand: init or info");
+            Console.Error.WriteLine("Missing db subcommand: init, info, or stats");
             return 1;
         }
 
         var sub = args[0].ToLowerInvariant();
-        var paths = new AppPaths();
-        var settingsService = new SettingsService(paths);
-        var db = new IconChestDatabase(settingsService);
+        var (db, _, imageRepo, _) = CreateContext();
 
         switch (sub)
         {
@@ -314,10 +341,411 @@ public static class Program
                 Console.WriteLine($"Schema Version: {version}");
                 return 0;
             }
+            case "stats":
+            {
+                var stats = imageRepo.GetStats();
+                Console.WriteLine("Database Statistics:");
+                Console.WriteLine($"  Library Folders: {stats.FoldersCount}");
+                Console.WriteLine($"  Total Images:    {stats.ImagesCount}");
+                Console.WriteLine($"  Missing:         {stats.MissingCount}");
+                Console.WriteLine($"  Hidden:          {stats.HiddenCount}");
+                Console.WriteLine($"  Duplicates:      {stats.DuplicatesCount}");
+                Console.WriteLine($"  Tags:            {stats.TagsCount}");
+                return 0;
+            }
             default:
                 Console.Error.WriteLine($"Unknown db subcommand: '{sub}'");
                 return 1;
         }
     }
-}
 
+    private static int HandleFolder(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("Missing folder subcommand: add, list, or remove");
+            return 1;
+        }
+
+        var sub = args[0].ToLowerInvariant();
+        var (_, folderRepo, _, _) = CreateContext();
+        var folderService = new LibraryFolderService(folderRepo);
+
+        switch (sub)
+        {
+            case "add":
+            {
+                if (args.Length < 2)
+                {
+                    Console.Error.WriteLine("Usage: iconchest folder add <path> [includePatterns]");
+                    return 1;
+                }
+                var path = args[1];
+                var includePatterns = args.Length > 2 ? args[2] : null;
+                var id = folderService.AddFolder(path, includePatterns);
+                Console.WriteLine($"Added folder with ID: {id}");
+                return 0;
+            }
+            case "list":
+            {
+                var list = folderService.ListFolders();
+                if (list.Count == 0)
+                {
+                    Console.WriteLine("No library folders configured.");
+                    return 0;
+                }
+
+                Console.WriteLine($"{"ID",-5} {"ENABLED",-8} {"IMAGES",-8} {"LAST SCAN",-22} {"PATH"}");
+                Console.WriteLine(new string('-', 80));
+                foreach (var f in list)
+                {
+                    var count = folderService.GetImageCount(f.Id);
+                    var lastScan = !string.IsNullOrWhiteSpace(f.LastScanUtc) ? f.LastScanUtc : "Never";
+                    Console.WriteLine($"{f.Id,-5} {(f.Enabled ? "Yes" : "No"),-8} {count,-8} {lastScan,-22} {f.Path}");
+                }
+                return 0;
+            }
+            case "remove":
+            {
+                if (args.Length < 2)
+                {
+                    Console.Error.WriteLine("Usage: iconchest folder remove <id or path> [--yes]");
+                    return 1;
+                }
+
+                var target = args[1];
+                var assumeYes = args.Any(a => a.Equals("--yes", StringComparison.OrdinalIgnoreCase) || a.Equals("-y", StringComparison.OrdinalIgnoreCase));
+
+                LibraryFolder? folder = null;
+                if (long.TryParse(target, out var id))
+                {
+                    folder = folderService.GetById(id);
+                }
+                if (folder == null)
+                {
+                    folder = folderService.GetByPath(target);
+                }
+
+                if (folder == null)
+                {
+                    Console.Error.WriteLine($"Folder '{target}' not found in library.");
+                    return 1;
+                }
+
+                if (!assumeYes)
+                {
+                    Console.Write($"Remove library folder '{folder.Path}' (ID: {folder.Id})? Disk files will not be touched. (y/N): ");
+                    var response = Console.ReadLine();
+                    if (!string.Equals(response?.Trim(), "y", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(response?.Trim(), "yes", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine("Removal cancelled.");
+                        return 0;
+                    }
+                }
+
+                folderService.RemoveFolder(folder.Id);
+                Console.WriteLine($"Removed folder {folder.Id} from library.");
+                return 0;
+            }
+            default:
+                Console.Error.WriteLine($"Unknown folder subcommand: '{sub}'");
+                return 1;
+        }
+    }
+
+    private static async Task<int> HandleScanAsync(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("Usage: iconchest scan <id or path> | iconchest scan --all");
+            return 1;
+        }
+
+        var (_, folderRepo, imageRepo, settingsService) = CreateContext();
+        var folderService = new LibraryFolderService(folderRepo);
+        var scanner = new LibraryScanner(
+            folderRepo,
+            imageRepo,
+            settingsService,
+            new XxHash128Hasher(),
+            new ImageMetadataReader());
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (sender, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            Console.WriteLine();
+            Console.WriteLine("Cancelling scan (finishing current batch)...");
+            cts.Cancel();
+        };
+
+        var progress = new Progress<ScanProgress>(p =>
+        {
+            var pathDisplay = !string.IsNullOrWhiteSpace(p.CurrentPath)
+                ? (p.CurrentPath.Length > 35 ? "..." + p.CurrentPath[^32..] : p.CurrentPath)
+                : "";
+
+            Console.Write($"\r[{p.Stage,-11}] Found: {p.FilesFound} | Proc: {p.FilesProcessed} | New: {p.NewFiles} | Chg: {p.ChangedFiles} | Mv: {p.MovedFiles} | Miss: {p.MissingFiles} | {pathDisplay,-35}");
+        });
+
+        if (args[0] is "--all" or "-a")
+        {
+            Console.WriteLine("Starting scan of all library folders...");
+            var results = await scanner.ScanAllAsync(progress, cts.Token);
+            Console.WriteLine();
+            Console.WriteLine("--- Scan Summary ---");
+            foreach (var r in results)
+            {
+                PrintScanResult(r);
+            }
+            return results.Any(r => r.IsFatalError) ? 1 : 0;
+        }
+        else
+        {
+            var target = args[0];
+            LibraryFolder? folder = null;
+            if (long.TryParse(target, out var id))
+            {
+                folder = folderService.GetById(id);
+            }
+            if (folder == null)
+            {
+                folder = folderService.GetByPath(target);
+            }
+
+            if (folder == null)
+            {
+                Console.Error.WriteLine($"Folder '{target}' not found in library.");
+                return 1;
+            }
+
+            Console.WriteLine($"Starting scan of folder {folder.Id}: {folder.Path}");
+            var result = await scanner.ScanAsync(folder.Id, progress, cts.Token);
+            Console.WriteLine();
+            Console.WriteLine("--- Scan Summary ---");
+            PrintScanResult(result);
+            return result.IsFatalError ? 1 : 0;
+        }
+    }
+
+    private static void PrintScanResult(ScanResult r)
+    {
+        Console.WriteLine($"Folder:       {r.FolderPath} (ID: {r.FolderId})");
+        Console.WriteLine($"Duration:     {r.Duration.TotalSeconds:F2}s");
+        Console.WriteLine($"Status:       {(r.IsCancelled ? "CANCELLED" : r.IsFatalError ? "FATAL ERROR" : r.IsIncomplete ? "INCOMPLETE (Warnings)" : "COMPLETED")}");
+        if (!string.IsNullOrWhiteSpace(r.FatalErrorMessage))
+        {
+            Console.WriteLine($"Error:        {r.FatalErrorMessage}");
+        }
+        Console.WriteLine($"Files Found:  {r.FilesFound}");
+        Console.WriteLine($"  Unchanged:  {r.UnchangedFiles}");
+        Console.WriteLine($"  New:        {r.NewFiles}");
+        Console.WriteLine($"  Changed:    {r.ChangedFiles}");
+        Console.WriteLine($"  Moved:      {r.MovedFiles}");
+        Console.WriteLine($"  Missing:    {r.MissingFiles}");
+        Console.WriteLine($"  Duplicates: {r.Duplicates}");
+        Console.WriteLine($"  Errors:     {r.Errors}");
+
+        if (r.WarningsAndErrors.Count > 0)
+        {
+            Console.WriteLine("Warnings/Errors (first 50):");
+            foreach (var w in r.WarningsAndErrors)
+            {
+                Console.WriteLine($"  - {w}");
+            }
+        }
+        Console.WriteLine();
+    }
+
+    private static int HandleList(string[] args)
+    {
+        long? folderId = null;
+        var includeHidden = false;
+        var includeMissing = false;
+        var duplicatesOnly = false;
+        var limit = 50;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] is "--folder" or "-f" && i + 1 < args.Length && long.TryParse(args[i + 1], out var fid))
+            {
+                folderId = fid;
+                i++;
+            }
+            else if (args[i] is "--hidden" or "-h")
+            {
+                includeHidden = true;
+            }
+            else if (args[i] is "--missing" or "-m")
+            {
+                includeMissing = true;
+            }
+            else if (args[i] is "--duplicates" or "-d")
+            {
+                duplicatesOnly = true;
+            }
+            else if (args[i] is "--limit" or "-l" && i + 1 < args.Length && int.TryParse(args[i + 1], out var lim))
+            {
+                limit = lim;
+                i++;
+            }
+        }
+
+        var (_, _, imageRepo, _) = CreateContext();
+        var images = imageRepo.List(folderId, includeHidden, includeMissing, duplicatesOnly, limit: limit, offset: 0);
+        var total = imageRepo.Count(folderId, includeHidden, includeMissing, duplicatesOnly);
+
+        Console.WriteLine($"Showing {images.Count} of {total} images:");
+        Console.WriteLine($"{"ID",-6} {"FORMAT",-7} {"DIMENSIONS",-12} {"SIZE",-10} {"FLAGS",-10} {"HASH (xxh128)",-18} {"PATH"}");
+        Console.WriteLine(new string('-', 95));
+
+        foreach (var img in images)
+        {
+            var dims = img.Width.HasValue && img.Height.HasValue ? $"{img.Width}x{img.Height}" : "-";
+            var sizeStr = FormatBytes(img.SizeBytes);
+            var flags = (img.IsFavourite ? "F" : "-") +
+                        (img.IsHidden ? "H" : "-") +
+                        (img.IsMissing ? "M" : "-") +
+                        (img.IsDuplicate ? "D" : "-") +
+                        (img.HasTransparency == true ? "T" : "-");
+
+            var shortHash = img.Hash.Length >= 16 ? img.Hash[..16] + ".." : img.Hash;
+            Console.WriteLine($"{img.Id,-6} {img.Format,-7} {dims,-12} {sizeStr,-10} {flags,-10} {shortHash,-18} {img.Path}");
+        }
+
+        return 0;
+    }
+
+    private static int HandleShow(string[] args)
+    {
+        if (args.Length == 0 || !long.TryParse(args[0], out var id))
+        {
+            Console.Error.WriteLine("Usage: iconchest show <image id>");
+            return 1;
+        }
+
+        var (_, _, imageRepo, _) = CreateContext();
+        var img = imageRepo.GetById(id);
+        if (img == null)
+        {
+            Console.Error.WriteLine($"Image with ID {id} not found.");
+            return 1;
+        }
+
+        Console.WriteLine($"Image Details (ID: {img.Id}):");
+        Console.WriteLine($"  Path:               {img.Path}");
+        Console.WriteLine($"  Path Key:           {img.PathKey}");
+        Console.WriteLine($"  Directory Path:     {img.DirectoryPath}");
+        Console.WriteLine($"  File Name:          {img.FileName}");
+        Console.WriteLine($"  Format:             {img.Format}");
+        Console.WriteLine($"  Dimensions:         {(img.Width.HasValue ? $"{img.Width}x{img.Height}" : "Unknown")}");
+        Console.WriteLine($"  Size:               {FormatBytes(img.SizeBytes)} ({img.SizeBytes} bytes)");
+        Console.WriteLine($"  Hash ({img.HashAlgo}):  {img.Hash}");
+        Console.WriteLine($"  Status:             {img.Status}");
+        Console.WriteLine($"  Title:              {img.Title}");
+        Console.WriteLine($"  Description:        {img.Description}");
+        Console.WriteLine($"  Rating:             {img.Rating} / 5");
+        Console.WriteLine($"  Is Favourite:       {img.IsFavourite}");
+        Console.WriteLine($"  Is Hidden:          {img.IsHidden}");
+        Console.WriteLine($"  Is Missing:         {img.IsMissing} (Since: {img.MissingSinceUtc ?? "N/A"})");
+        Console.WriteLine($"  Is Duplicate:       {img.IsDuplicate}");
+        Console.WriteLine($"  Has Transparency:   {(img.HasTransparency.HasValue ? img.HasTransparency.Value.ToString() : "Unknown")}");
+        Console.WriteLine($"  Created (UTC):      {img.CreatedUtc ?? "N/A"}");
+        Console.WriteLine($"  Modified (UTC):     {img.ModifiedUtc ?? "N/A"}");
+        Console.WriteLine($"  Exif Date (UTC):    {img.ExifDateUtc ?? "N/A"}");
+        Console.WriteLine($"  Taken Override:     {img.TakenOverrideUtc ?? "N/A"}");
+        Console.WriteLine($"  Effective Date:     {img.EffectiveDateUtc ?? "N/A"}");
+        Console.WriteLine($"  Added to DB (UTC):  {img.AddedUtc}");
+
+        if (!string.IsNullOrWhiteSpace(img.ExifJson))
+        {
+            Console.WriteLine("  EXIF Metadata:");
+            try
+            {
+                using var doc = JsonDocument.Parse(img.ExifJson);
+                var formatted = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+                foreach (var line in formatted.Split('\n'))
+                {
+                    Console.WriteLine($"    {line}");
+                }
+            }
+            catch
+            {
+                Console.WriteLine($"    {img.ExifJson}");
+            }
+        }
+
+        return 0;
+    }
+
+    private static async Task<int> HandleHashAsync(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("Usage: iconchest hash <file path>");
+            return 1;
+        }
+
+        var path = args[0];
+        if (!File.Exists(path))
+        {
+            Console.Error.WriteLine($"File '{path}' does not exist.");
+            return 1;
+        }
+
+        var hasher = new XxHash128Hasher();
+        var hash = await hasher.HashFileAsync(path);
+        Console.WriteLine($"Algorithm: {hasher.AlgorithmName}");
+        Console.WriteLine($"Hash:      {hash}");
+        return 0;
+    }
+
+    private static int HandleImage(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.Error.WriteLine("Usage: iconchest image hide|unhide <id>");
+            return 1;
+        }
+
+        var sub = args[0].ToLowerInvariant();
+        if (!long.TryParse(args[1], out var id))
+        {
+            Console.Error.WriteLine("Invalid image id.");
+            return 1;
+        }
+
+        var (_, _, imageRepo, _) = CreateContext();
+        var img = imageRepo.GetById(id);
+        if (img == null)
+        {
+            Console.Error.WriteLine($"Image with ID {id} not found.");
+            return 1;
+        }
+
+        switch (sub)
+        {
+            case "hide":
+                imageRepo.SetHidden(id, true);
+                imageRepo.RecomputeDuplicates(new[] { img.Hash });
+                Console.WriteLine($"Image {id} is now hidden. Recomputed duplicates.");
+                return 0;
+            case "unhide":
+                imageRepo.SetHidden(id, false);
+                imageRepo.RecomputeDuplicates(new[] { img.Hash });
+                Console.WriteLine($"Image {id} is now unhidden. Recomputed duplicates.");
+                return 0;
+            default:
+                Console.Error.WriteLine($"Unknown image subcommand: '{sub}'");
+                return 1;
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F2} MB";
+    }
+}

@@ -47,7 +47,7 @@ public class LoggingTests
                 logger.LogError("error-msg-should-be-written");
             }
 
-            var logFile = Path.Combine(tempDir, "app-20261101.log");
+            var logFile = Assert.Single(Directory.GetFiles(tempDir, "app-*.log"));
             Assert.True(File.Exists(logFile));
             var content = File.ReadAllText(logFile);
 
@@ -77,10 +77,10 @@ public class LoggingTests
                 logger.LogWarning("warning-message");
             }
 
-            var logFile = Path.Combine(tempDir, "app-20261101.log");
-            if (File.Exists(logFile))
+            var logFiles = Directory.GetFiles(tempDir, "app-*.log");
+            foreach (var file in logFiles)
             {
-                var content = File.ReadAllText(logFile);
+                var content = File.ReadAllText(file);
                 Assert.Empty(content);
             }
         }
@@ -108,7 +108,7 @@ public class LoggingTests
                 logger.LogInformation("info-after-level-change");
             }
 
-            var logFile = Path.Combine(tempDir, "app-20261101.log");
+            var logFile = Assert.Single(Directory.GetFiles(tempDir, "app-*.log"));
             Assert.True(File.Exists(logFile));
             var content = File.ReadAllText(logFile);
 

@@ -25,8 +25,8 @@ public class DatabaseTests
             Assert.Equal(0, initialVersion);
 
             var migratedVersion = db.Migrate();
-            Assert.Equal(1, migratedVersion);
-            Assert.Equal(1, db.GetSchemaVersion());
+            Assert.Equal(2, migratedVersion);
+            Assert.Equal(2, db.GetSchemaVersion());
 
             // Check tables exist
             using var conn = db.OpenConnection();
@@ -52,8 +52,8 @@ public class DatabaseTests
         {
             var v1 = db.Migrate();
             var v2 = db.Migrate();
-            Assert.Equal(1, v1);
-            Assert.Equal(1, v2);
+            Assert.Equal(2, v1);
+            Assert.Equal(2, v2);
         }
         finally
         {
@@ -77,7 +77,7 @@ public class DatabaseTests
 
             var ex = Assert.Throws<SchemaVersionException>(() => db.Migrate());
             Assert.Equal(99, ex.DatabaseVersion);
-            Assert.Equal(1, ex.SupportedVersion);
+            Assert.Equal(2, ex.SupportedVersion);
         }
         finally
         {
@@ -341,9 +341,9 @@ public class DatabaseTests
         var (db, tempFile) = CreateTempFileDb();
         try
         {
-            // Initial migration succeeds to version 1
+            // Initial migration succeeds to version 2
             db.Migrate();
-            Assert.Equal(1, db.GetSchemaVersion());
+            Assert.Equal(2, db.GetSchemaVersion());
 
             // Execute an explicit failed migration block within transaction
             using (var conn = db.OpenConnection())
@@ -354,7 +354,7 @@ public class DatabaseTests
                     conn.Execute("CREATE TABLE temp_rollback_test (id INTEGER PRIMARY KEY);", transaction: tx);
                     // Invalid SQL statement to trigger failure
                     conn.Execute("INSERT INTO non_existent_table VALUES (1);", transaction: tx);
-                    conn.Execute("INSERT INTO schema_version (version, applied_utc, description) VALUES (2, '2026-11-01', 'Fail');", transaction: tx);
+                    conn.Execute("INSERT INTO schema_version (version, applied_utc, description) VALUES (3, '2026-11-01', 'Fail');", transaction: tx);
                     tx.Commit();
                 }
                 catch
@@ -362,11 +362,11 @@ public class DatabaseTests
                     tx.Rollback();
                 }
 
-                // Verify temp_rollback_test was rolled back and schema_version is still 1
+                // Verify temp_rollback_test was rolled back and schema_version is still 2
                 var tableExists = conn.ExecuteScalar<int>("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'temp_rollback_test';");
                 Assert.Equal(0, tableExists);
                 var maxVersion = conn.ExecuteScalar<int>("SELECT MAX(version) FROM schema_version;");
-                Assert.Equal(1, maxVersion);
+                Assert.Equal(2, maxVersion);
             }
         }
         finally

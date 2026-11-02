@@ -49,7 +49,12 @@ Every build of an executable automatically writes an adjacent `version.json` con
 Run all unit and integration tests across Linux and Windows:
 
 ```bash
-dotnet test IconChest.sln
+dotnet test IconChest.sln --filter "Category!=Explicit"
+```
+
+To run the slow explicit performance benchmark (scanning 5,000 generated image files):
+```bash
+dotnet test IconChest.sln --filter "Category=Explicit" --logger "console;verbosity=detailed"
 ```
 
 Tests run against in-memory or isolated temporary databases and temporary directories. They do not touch real user folders and do not depend on system timezone or locale.
@@ -60,40 +65,100 @@ Tests run against in-memory or isolated temporary databases and temporary direct
 
 The CLI binary is output to `src/IconChest.Cli/bin/Debug/net10.0/iconchest`.
 
-### 1. Version Info
-Print current version, build timestamp, and executable path:
+### 1. Library Folder Operations
+Add a folder to the library (validates readable, exists, and rejects duplicates or nested parents/children):
 ```bash
-./src/IconChest.Cli/bin/Debug/net10.0/iconchest version
+iconchest folder add /path/to/folder
 ```
 
-### 2. Logging Test
-Test logging output and runtime filtering across levels (`Off`, `Error`, `Warning`, `Information`, `Debug`, `Trace`):
+List all configured library folders:
 ```bash
-./src/IconChest.Cli/bin/Debug/net10.0/iconchest log-test --level Information
+iconchest folder list
 ```
 
-### 3. Database Operations
-Initialize or migrate the database:
+Enable or disable scanning for a library folder:
 ```bash
-./src/IconChest.Cli/bin/Debug/net10.0/iconchest db init
+iconchest folder enable <id>
+iconchest folder disable <id>
 ```
+
+Remove a folder from the library (prompts confirmation, cascade deletes database records, never touches files on disk):
+```bash
+iconchest folder remove <id>
+```
+
+### 2. Scanning
+Scan a folder by ID or path:
+```bash
+iconchest scan <id|path>
+```
+
+Scan all enabled library folders:
+```bash
+iconchest scan --all
+```
+
+### 3. Image Operations
+List indexed images with paging and status flags:
+```bash
+iconchest list [--folder <id>] [--all] [--missing] [--duplicates] [--limit 50] [--offset 0]
+```
+
+Display detailed metadata for a single image:
+```bash
+iconchest show <id>
+```
+
+Hide or unhide an image (hiding automatically recomputes duplicate flags for surviving images):
+```bash
+iconchest image hide <id>
+iconchest image unhide <id>
+```
+
+Compute the standalone XxHash128 hash of any file:
+```bash
+iconchest hash /path/to/file.png
+```
+
+### 4. Database Operations
+Initialize or migrate the database (migrations 0001 and 0002):
+```bash
+iconchest db init
+```
+
 Inspect current schema version:
 ```bash
-./src/IconChest.Cli/bin/Debug/net10.0/iconchest db info
+iconchest db info
 ```
 
-### 4. Settings Operations
+View database entity counts and statistics:
+```bash
+iconchest db stats
+```
+
+### 5. Settings Operations
 Show full configuration:
 ```bash
-./src/IconChest.Cli/bin/Debug/net10.0/iconchest settings show
+iconchest settings show
 ```
 Read a specific setting:
 ```bash
-./src/IconChest.Cli/bin/Debug/net10.0/iconchest settings get theme
+iconchest settings get theme
 ```
 Update a setting:
 ```bash
-./src/IconChest.Cli/bin/Debug/net10.0/iconchest settings set theme Dark
+iconchest settings set theme Dark
+```
+
+### 6. Logging and Diagnostics
+Print version info:
+```bash
+iconchest version
+```
+
+Test logging output across levels:
+```bash
+iconchest log-test --level Information
 ```
 
 ### Environment Variable Overrides
