@@ -48,7 +48,19 @@ All **412 tests** across the entire solution are passing cleanly (0 failures, 0 
 
 
 
+
+
+
+
+
 ---
+
+
+
+
+
+
+
 
 
 # How can I test Phase 5?
@@ -61,13 +73,15 @@ You can test Phase 5 at three levels: **automated tests**, the **developer CLI**
 
 Run the full suite (412 tests across `IconChest.Core.Tests` and `IconChest.Api.Tests`) or target the Phase 5 query suite specifically:
 
-bash
+
+```bash
 # Run all query language unit, semantic, fuzz, date, golden & benchmark tests (203 tests)
 dotnet test tests/IconChest.Core.Tests --filter "FullyQualifiedName~Query"
 # Run all API query endpoint integration tests
 dotnet test tests/IconChest.Api.Tests --filter "FullyQualifiedName~Query"
 # Run the complete test suite across the entire solution
 dotnet test
+```
 
 ---
 
@@ -77,64 +91,68 @@ The CLI provides subcommands under `query` for validating syntax/semantics, insp
 
 #### **A. Validate valid expressions and inspect compiled SQL**
 
-bash
+```bash
 # Validate and print compiled parameterised SQL WHERE clause and bindings
 dotnet run --project src/IconChest.Cli -- query validate "tag == \"animal\" and (width > 64 or transparent == true)" --sql
+```
 
 #### **B. Validate error reporting and terminal caret placement**
 
-bash
+```bash
 # 1. Syntax error: missing value after operator
 dotnet run --project src/IconChest.Cli -- query validate "tag =="
 # 2. Semantic error: unknown field with typo suggestion
 dotnet run --project src/IconChest.Cli -- query validate "fomrat == png"
 # 3. Semantic error: invalid size unit / rating range
 dotnet run --project src/IconChest.Cli -- query validate "rating > 10 and size < 5foo"
-
+```
 #### **C. Inspect the AST and SQLite** `**EXPLAIN QUERY PLAN**`
 
-bash
+```bash
 # Dumps untyped AST JSON, compiled SQL with parameters, and SQLite's query plan
 dotnet run --project src/IconChest.Cli -- query explain "tag == \"dog\" or type == png"
+```
 
 #### **D. Run queries against your local library database**
 
-bash
+```bash
 # Search images using query language
 dotnet run --project src/IconChest.Cli -- query run "type in (png, svg) and rating >= 3" --limit 10
+```
 
 #### **E. Verify / update documentation**
 
-bash
+```bash
 # Verify the markdown docs match the codebase definitions
 dotnet run --project src/IconChest.Cli -- query docs --write
-
+```
 ---
 
 ### **3. Test via the HTTP API (**`**src/IconChest.Api**`**)**
 
 Start the API server (or test with `curl` against a running instance):
 
-bash
+```bash
 dotnet run --project src/IconChest.Api -- --port 5000 --swagger
-
+```
 #### **A. Query Images (**`**GET /api/images?q=...**`**)**
 
+```
 bash
 # Search using the query language
 curl -s "http://127.0.0.1:5000/api/images?q=type%20==%20png%20and%20width%20%3E=%20128" | jq
 # Retrieve only IDs matching query
 curl -s "http://127.0.0.1:5000/api/images/ids?q=tag%20like%20\"*icon*\"" | jq
-
+```
 #### **B. Verify 400 ProblemDetails on invalid query**
 
-bash
+```bash
 # Query with syntax error returns RFC 7807 problem details with positional queryErrors
 curl -s "http://127.0.0.1:5000/api/images?q=tag%20==" | jq
-
+```
 Expected response:
 
-json
+```json
 {
   "type": "https://tools.ietf.org/html/rfc7807#status-400",
   "title": "Invalid query",
@@ -149,29 +167,37 @@ json
     }
   ]
 }
-
+```
 #### **C. Mutual exclusivity test (reject** `**q**` **+ structured filters)**
 
+```
 bash
 # Mixing `q` and structured filter returns 400
 curl -s "http://127.0.0.1:5000/api/images?q=rating%20%3E%203&type=png" | jq
-
+```
 #### **D. Standalone Validation Endpoint (**`**POST /api/query/validate**`**)**
 
+```
 bash
 curl -s -X POST http://127.0.0.1:5000/api/query/validate \
   -H "Content-Type: application/json" \
   -d '{"text": "width > 128 and tag like \"app*\""}' | jq
-
+```
 #### **E. Help & Examples Endpoint (**`**GET /api/query/help**`**)**
 
+```
 bash
 # Returns all 20 fields, operators, aliases, and 30+ examples
 curl -s http://127.0.0.1:5000/api/query/help | jq
-
+```
 #### **F. Convert Simple Filter to Query (**`**POST /api/query/from-filter**`**)**
 
+```
 bash
 curl -s -X POST http://127.0.0.1:5000/api/query/from-filter \
   -H "Content-Type: application/json" \
   -d '{"types": ["png", "svg"], "minRating": 4, "text": "dashboard"}' | jq
+```
+
+
+

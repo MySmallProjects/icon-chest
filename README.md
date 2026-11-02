@@ -18,11 +18,39 @@ IconChest strictly adheres to a non-destructive principle: **it never modifies, 
 ## Prerequisites
 
 * [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (`net10.0`)
-* On Linux Mint / Ubuntu:
-  ```bash
-  sudo apt install -y dotnet-sdk-10.0
-  ```
-  *(Or install via `curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0`)*
+* **Linux Desktop (Photino.NET WebKitGTK runtime):**
+  * Ubuntu 22.04 LTS / Linux Mint 21:
+    ```bash
+    sudo apt install -y libwebkit2gtk-4.0-37
+    ```
+  * Ubuntu 24.04 LTS / Linux Mint 22:
+    ```bash
+    sudo apt install -y libwebkit2gtk-4.1-0
+    ```
+* **Windows Desktop:**
+  * Microsoft Edge WebView2 Runtime (pre-installed on Windows 10/11; detected via Registry).
+* **Headless / Browser Fallback:**
+  * Run with `--browser` to open the app directly in your default web browser without native WebKitGTK/WebView2 dependencies.
+
+---
+
+## Running the Desktop Application
+
+To launch the desktop application (which builds and launches the API child process and opens the native shell):
+
+```bash
+dotnet run --project src/IconChest.Desktop
+```
+
+### Browser Fallback Mode
+If running in a headless environment, container, or Linux without WebKitGTK:
+```bash
+dotnet run --project src/IconChest.Desktop -- --browser
+```
+
+### Desktop Command Line Arguments
+* `--browser`: Starts the API child process and opens the default system browser instead of launching the native Photino window.
+* `--devtools`: Opens developer tools / web inspector on startup.
 
 ---
 

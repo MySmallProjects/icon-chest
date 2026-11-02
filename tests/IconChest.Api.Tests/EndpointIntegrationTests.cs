@@ -186,4 +186,32 @@ public class EndpointIntegrationTests
         Assert.NotNull(firstLine);
         Assert.Contains(": connected", firstLine);
     }
+
+    [Fact]
+    public async Task System_Licenses_RequiresAuthentication_AndReturnsNotices()
+    {
+        // 1. Unauthenticated request should be rejected with 401
+        var anonClient = _factory.CreateClient();
+        var unauthRes = await anonClient.GetAsync("/api/system/licenses");
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthRes.StatusCode);
+
+        // 2. Authenticated request should return 200 OK with license text
+        var authClient = await _factory.CreateAuthenticatedClientAsync();
+        var authRes = await authClient.GetAsync("/api/system/licenses");
+        Assert.Equal(HttpStatusCode.OK, authRes.StatusCode);
+        var text = await authRes.Content.ReadAsStringAsync();
+        Assert.Contains("Third-Party Notices", text);
+        Assert.Contains("Photino.NET", text);
+    }
+
+    [Fact]
+    public async Task StaticAssets_IncludeNoCacheHeader()
+    {
+        var client = _factory.CreateClient();
+
+        // 1. Root / index.html
+        var rootRes = await client.GetAsync("/");
+        Assert.True(rootRes.Headers.CacheControl?.NoCache == true ||
+                    rootRes.Headers.CacheControl?.ToString().Contains("no-cache") == true);
+    }
 }

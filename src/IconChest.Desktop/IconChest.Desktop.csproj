@@ -2,10 +2,24 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\IconChest.Core\IconChest.Core.csproj" />
+    <ProjectReference Include="..\IconChest.Api\IconChest.Api.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
   </ItemGroup>
-</Project>
 
+  <Target Name="CopyApiToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <ApiFiles Include="..\IconChest.Api\bin\$(Configuration)\net10.0\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ApiFiles)"
+          DestinationFolder="$(TargetDir)api\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

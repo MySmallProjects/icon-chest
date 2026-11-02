@@ -11,5 +11,15 @@
   <ItemGroup>
     <ProjectReference Include="..\IconChest.Core\IconChest.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\docs\THIRD-PARTY-NOTICES.md" Link="Resources\THIRD-PARTY-NOTICES.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="wwwroot\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>
 

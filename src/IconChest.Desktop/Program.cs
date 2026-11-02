@@ -1,5 +1,4 @@
-using IconChest.Core.Versioning;
+using IconChest.Desktop;
 
-var versionInfo = new VersionInfo();
-Console.WriteLine($"IconChest Desktop placeholder {versionInfo.Version}");
-
+var app = new DesktopApp();
+return await app.RunAsync(args);

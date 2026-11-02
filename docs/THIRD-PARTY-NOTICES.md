@@ -97,3 +97,16 @@ IconChest incorporates open-source software. Below is a list of third-party libr
 - **License:** MIT
 - **URL:** https://github.com/domaindrivendev/Swashbuckle.AspNetCore
 - **Notice:** Copyright (c) 2016-2024 Richard Morris. Licensed under the MIT License.
+
+
+### Photino.NET
+- **Version:** 4.0.16
+- **License:** Apache-2.0
+- **URL:** https://github.com/tryphotino/photino.NET
+- **Notice:** Copyright (c) 2020-2024 TryPhotino. Licensed under the Apache License, Version 2.0.
+
+### Microsoft.Playwright (Test dependency)
+- **Version:** 1.64.1
+- **License:** Apache-2.0
+- **URL:** https://github.com/microsoft/playwright-dotnet
+- **Notice:** Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the Apache License, Version 2.0.

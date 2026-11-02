@@ -1,0 +1,75 @@
+/* Dark Theme (Default) */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-app: #0f172a;           /* Slate 900 */
+  --bg-surface: #1e293b;       /* Slate 800 */
+  --bg-surface-hover: #334155; /* Slate 700 */
+  --bg-surface-active: #475569;/* Slate 600 */
+  --bg-input: #0b1120;
+  --bg-input-focus: #0f172a;
+  
+  --border-subtle: #334155;    /* Slate 700 */
+  --border-muted: #1e293b;     /* Slate 800 */
+  --border-focus: #38bdf8;     /* Sky 400 */
+
+  --text-primary: #f8fafc;     /* Slate 50 */
+  --text-secondary: #94a3b8;   /* Slate 400 */
+  --text-muted: #64748b;       /* Slate 500 */
+  --text-inverse: #0f172a;
+
+  --accent-primary: #0284c7;   /* Sky 600 */
+  --accent-primary-hover: #0369a1;
+  --accent-text: #ffffff;
+  --accent-subtle: rgba(2, 132, 199, 0.15);
+
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-danger: #ef4444;
+  --status-info: #0ea5e9;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
+
+  --focus-ring: 0 0 0 2px #0f172a, 0 0 0 4px #38bdf8;
+}
+
+/* Light Theme */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-app: #f8fafc;           /* Slate 50 */
+  --bg-surface: #ffffff;       /* White */
+  --bg-surface-hover: #f1f5f9; /* Slate 100 */
+  --bg-surface-active: #e2e8f0;/* Slate 200 */
+  --bg-input: #ffffff;
+  --bg-input-focus: #ffffff;
+  
+  --border-subtle: #cbd5e1;    /* Slate 300 */
+  --border-muted: #e2e8f0;     /* Slate 200 */
+  --border-focus: #0284c7;     /* Sky 600 */
+
+  --text-primary: #0f172a;     /* Slate 900 */
+  --text-secondary: #475569;   /* Slate 600 */
+  --text-muted: #64748b;       /* Slate 500 */
+  --text-inverse: #ffffff;
+
+  --accent-primary: #0284c7;   /* Sky 600 */
+  --accent-primary-hover: #0369a1;
+  --accent-text: #ffffff;
+  --accent-subtle: rgba(2, 132, 199, 0.1);
+
+  --status-success: #059669;
+  --status-warning: #d97706;
+  --status-danger: #dc2626;
+  --status-info: #0284c7;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
+  --focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #0284c7;
+}
+

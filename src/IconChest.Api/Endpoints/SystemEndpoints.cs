@@ -251,5 +251,44 @@ public static class SystemEndpoints
         })
         .WithName("SetLanPassword")
         .WithSummary("Sets or updates the LAN password (requires current password if already set)");
+
+        // 7. GET /api/system/licenses (Authenticated)
+        group.MapGet("/system/licenses", () =>
+        {
+            var assembly = typeof(SystemEndpoints).Assembly;
+            var resourceName = assembly.GetManifestResourceNames()
+                .FirstOrDefault(n => n.EndsWith("THIRD-PARTY-NOTICES.md", StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(resourceName))
+            {
+                using var stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream != null)
+                {
+                    using var reader = new StreamReader(stream);
+                    return Results.Text(reader.ReadToEnd(), "text/plain; charset=utf-8");
+                }
+            }
+
+            // Fallback to searching disk paths if running unpacked or during development
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-NOTICES.md"),
+                Path.Combine(AppContext.BaseDirectory, "docs", "THIRD-PARTY-NOTICES.md"),
+                Path.Combine(Directory.GetCurrentDirectory(), "docs", "THIRD-PARTY-NOTICES.md"),
+                Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "docs", "THIRD-PARTY-NOTICES.md")
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                {
+                    return Results.Text(File.ReadAllText(candidate), "text/plain; charset=utf-8");
+                }
+            }
+
+            return Results.NotFound(new { error = "Third-party notices document not found." });
+        })
+        .WithName("GetLicenses")
+        .WithSummary("Retrieves third-party license notices");
     }
 }

@@ -1,0 +1,228 @@
+#app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  user-select: none;
+}
+
+#main-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ==========================================================================
+   Icon Bar (Left Column)
+   ========================================================================== */
+#icon-bar {
+  width: var(--icon-bar-width);
+  min-width: var(--icon-bar-width);
+  background-color: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) 0;
+  z-index: 20;
+}
+
+.icon-bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+}
+
+.icon-bar-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+  position: relative;
+}
+
+.icon-bar-btn:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.icon-bar-btn.active {
+  background-color: var(--accent-subtle);
+  color: var(--accent-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.icon-bar-btn.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background-color: var(--accent-primary);
+}
+
+.icon-bar-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+/* ==========================================================================
+   Working Area (Panel A, Resizer, Panel B, Details Panel Slot)
+   ========================================================================== */
+#work-area {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Panel A (View/Tree sidebar) */
+#panel-a {
+  width: var(--panel-a-default-width);
+  min-width: var(--panel-a-min-width);
+  max-width: var(--panel-a-max-width);
+  background-color: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#panel-a[hidden] {
+  display: none !important;
+}
+
+.panel-a-header {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.panel-a-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+/* Resizer Handle */
+#pane-resizer {
+  width: var(--resizer-width);
+  cursor: col-resize;
+  background-color: transparent;
+  flex-shrink: 0;
+  position: relative;
+  transition: background-color var(--transition-fast);
+  z-index: 10;
+}
+
+#pane-resizer:hover,
+#pane-resizer:focus-visible,
+#pane-resizer.is-dragging {
+  background-color: var(--accent-primary);
+}
+
+#pane-resizer[hidden] {
+  display: none !important;
+}
+
+/* Panel B (Main Working Area) */
+#panel-b {
+  flex: 1;
+  min-width: 0;
+  background-color: var(--bg-app);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* View Mounting Slot */
+.view-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  user-select: text;
+}
+
+.view-container[hidden] {
+  display: none !important;
+}
+
+/* Details Panel Slot (Reserved for Phase 8) */
+#panel-details-slot {
+  display: none;
+}
+
+/* ==========================================================================
+   Status Bar (Bottom Row)
+   ========================================================================== */
+#status-bar {
+  height: var(--status-bar-height);
+  min-height: var(--status-bar-height);
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  z-index: 20;
+}
+
+.status-left, .status-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--status-success);
+}
+
+.status-indicator.disconnected {
+  background-color: var(--status-danger);
+}
+
+.status-indicator.connecting {
+  background-color: var(--status-warning);
+}
+
+/* ==========================================================================
+   Responsive Overlay (Narrow screens < 900px)
+   ========================================================================== */
+@media (max-width: 900px) {
+  #panel-a:not([hidden]) {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 15;
+    box-shadow: var(--shadow-lg);
+  }
+}
+

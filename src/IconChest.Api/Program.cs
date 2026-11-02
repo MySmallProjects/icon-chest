@@ -20,7 +20,46 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.OpenApi.Models;
 
-var builder = WebApplication.CreateBuilder(args);
+// Locate wwwroot directory
+string? webRoot = null;
+var webRootCandidates = new[]
+{
+    Path.Combine(AppContext.BaseDirectory, "wwwroot"),
+    Path.Combine(Directory.GetCurrentDirectory(), "src", "IconChest.Api", "wwwroot"),
+    Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")
+};
+
+foreach (var candidate in webRootCandidates)
+{
+    if (Directory.Exists(candidate) && File.Exists(Path.Combine(candidate, "index.html")))
+    {
+        webRoot = Path.GetFullPath(candidate);
+        break;
+    }
+}
+
+if (webRoot == null)
+{
+    var dir = new DirectoryInfo(AppContext.BaseDirectory);
+    while (dir != null)
+    {
+        var candidate = Path.Combine(dir.FullName, "src", "IconChest.Api", "wwwroot");
+        if (Directory.Exists(candidate) && File.Exists(Path.Combine(candidate, "index.html")))
+        {
+            webRoot = Path.GetFullPath(candidate);
+            break;
+        }
+        dir = dir.Parent;
+    }
+}
+
+var builderOptions = new WebApplicationOptions
+{
+    Args = args,
+    WebRootPath = webRoot
+};
+
+var builder = WebApplication.CreateBuilder(builderOptions);
 
 // 1. Parse command line options
 int? cliPort = null;
@@ -214,7 +253,7 @@ app.Use(async (context, next) =>
     await next();
 });
 
-// Static hosting with no-cache on index.html
+// Static hosting with no-cache on index.html, .js, and .css files
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -223,9 +262,11 @@ app.UseStaticFiles(new StaticFileOptions
         var path = ctx.Context.Request.Path.Value ?? string.Empty;
         if (ctx.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase) ||
             path.Equals("/", StringComparison.Ordinal) ||
-            path.EndsWith("index.html", StringComparison.OrdinalIgnoreCase))
+            path.EndsWith("index.html", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
         {
-            ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
         }
     }
 });
