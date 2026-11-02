@@ -29,6 +29,8 @@ public class SettingsTests
             Assert.Null(s.DbPath);
             Assert.Null(s.ThumbnailCachePath);
             Assert.Equal(2048, s.ThumbnailCacheMaxMb);
+            Assert.Equal(85, s.ThumbnailQuality);
+            Assert.Equal(0, s.ThumbnailWorkers);
             Assert.Equal(AppLogLevel.Information, s.LogLevel);
             Assert.Equal(AppTheme.Light, s.Theme);
             Assert.Equal(GridCaptionMode.None, s.GridCaption);
@@ -254,6 +256,23 @@ public class SettingsTests
             var parent = Path.GetDirectoryName(configDir);
             if (parent != null && Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(101)]
+    [InlineData(-5)]
+    public void Validation_InvalidThumbnailQuality_Throws(int quality)
+    {
+        var settings = new AppSettings { ThumbnailQuality = quality };
+        Assert.Throws<ArgumentOutOfRangeException>(() => settings.Validate());
+    }
+
+    [Fact]
+    public void Validation_NegativeThumbnailWorkers_Throws()
+    {
+        var settings = new AppSettings { ThumbnailWorkers = -1 };
+        Assert.Throws<ArgumentOutOfRangeException>(() => settings.Validate());
     }
 }
 

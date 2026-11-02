@@ -66,10 +66,10 @@ public sealed class ImageRepository : IImageRepository
         return records.ToDictionary(r => r.PathKey, StringComparer.Ordinal);
     }
 
-    public void InsertBatch(IEnumerable<ImageRecord> records)
+    public IReadOnlyList<long> InsertBatch(IEnumerable<ImageRecord> records)
     {
         var list = records.ToList();
-        if (list.Count == 0) return;
+        if (list.Count == 0) return Array.Empty<long>();
 
         using var conn = _connectionFactory.CreateAndOpenConnection();
         using var tx = conn.BeginTransaction();
@@ -85,15 +85,23 @@ public sealed class ImageRepository : IImageRepository
                     is_duplicate, has_transparency, status, exif_json
                 ) VALUES (
                     @FolderId, @Path, @PathKey, @DirectoryPath, @DirectoryKey,
-                    @FileName, @Extension, @Format, @Width, @Height, @SizeBytes,
+                    @FileName, @Extension, @Format, COALESCE(@Width, 0), COALESCE(@Height, 0), @SizeBytes,
                     @Hash, @HashAlgo, @CreatedUtc, @ModifiedUtc, @ExifDateUtc,
                     @TakenOverrideUtc, @AddedUtc, @Title, @Description, @Rating,
                     @IsFavourite, @IsHidden, @IsMissing, @MissingSinceUtc,
                     @IsDuplicate, @HasTransparency, @Status, @ExifJson
-                );";
+                ) RETURNING id;";
 
-            conn.Execute(sql, list, transaction: tx);
+            var ids = new List<long>(list.Count);
+            foreach (var record in list)
+            {
+                var id = conn.QuerySingle<long>(sql, record, transaction: tx);
+                record.Id = id;
+                ids.Add(id);
+            }
+
             tx.Commit();
+            return ids;
         }
         catch
         {
@@ -115,8 +123,8 @@ public sealed class ImageRepository : IImageRepository
             const string sql = @"
                 UPDATE image SET
                     format = @Format,
-                    width = @Width,
-                    height = @Height,
+                    width = COALESCE(@Width, 0),
+                    height = COALESCE(@Height, 0),
                     size_bytes = @SizeBytes,
                     hash = @Hash,
                     hash_algo = @HashAlgo,

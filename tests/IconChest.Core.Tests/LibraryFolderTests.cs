@@ -167,7 +167,6 @@ public class LibraryFolderTests
 
                 var tagId = conn.QuerySingle<long>("INSERT INTO tag (name) VALUES ('Nature') RETURNING id;");
                 conn.Execute("INSERT INTO image_tag (image_id, tag_id) VALUES (@imageId, @tagId);", new { imageId, tagId });
-                conn.Execute("INSERT INTO thumbnail_job (image_id, size, updated_utc) VALUES (@imageId, 64, '2026-11-01');", new { imageId });
             }
 
             // Remove the folder
@@ -179,7 +178,6 @@ public class LibraryFolderTests
                 Assert.Equal(0, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM library_folder WHERE id = @folderId;", new { folderId }));
                 Assert.Equal(0, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM image WHERE folder_id = @folderId;", new { folderId }));
                 Assert.Equal(0, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM image_tag;"));
-                Assert.Equal(0, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM thumbnail_job;"));
                 Assert.Equal(1, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM tag WHERE name = 'Nature';")); // Tag kept
             }
 

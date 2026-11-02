@@ -88,22 +88,16 @@ public static class ImageTestFixtures
 
     public static byte[] CreateGif(int width = 16, int height = 16)
     {
-        // Minimal 1x1 or 16x16 valid GIF89a
-        return new byte[]
+        if (width >= 32 || height >= 32)
         {
-            0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // GIF89a
-            (byte)(width & 0xFF), (byte)((width >> 8) & 0xFF),
-            (byte)(height & 0xFF), (byte)((height >> 8) & 0xFF),
-            0xF0, 0x00, 0x00, // Global color table flag (2 colors)
-            0x00, 0x00, 0x00, // Color 0: Black
-            0xFF, 0xFF, 0xFF, // Color 1: White
-            0x2C, 0x00, 0x00, 0x00, 0x00, // Image descriptor
-            (byte)(width & 0xFF), (byte)((width >> 8) & 0xFF),
-            (byte)(height & 0xFF), (byte)((height >> 8) & 0xFF),
-            0x00,
-            0x02, 0x02, 0x44, 0x01, 0x00, // LZW Raster data
-            0x3B // Trailer
-        };
+            // Valid 32x32 2-frame animated GIF
+            return Convert.FromHexString(
+                "47494638396120002000810000ff000000000000000000000021ff0b4e45545343415045322e30030100000021f904000a0000002c00000000200020000008350001081c48b0a0c18308132a5cc8b0a1c38710234a9c48b1a2c58b18336adcc8b1a3c78f20438a1c49b2a4c9932853aa5cc95264400021f904010a0001002c0000000020002000810000ff00000000000000000008350001081c48b0a0c18308132a5cc8b0a1c38710234a9c48b1a2c58b18336adcc8b1a3c78f20438a1c49b2a4c9932853aa5cc9526440003b");
+        }
+
+        // Valid 16x16 2-frame animated GIF
+        return Convert.FromHexString(
+            "47494638396110001000810000ff000000000000000000000021ff0b4e45545343415045322e30030100000021f904000a0000002c000000001000100000081d0001081c48b0a0c18308132a5cc8b0a1c38710234a9c48b1a2c58101010021f904010a0001002c0000000010001000810000ff000000000000000000081d0001081c48b0a0c18308132a5cc8b0a1c38710234a9c48b1a2c5810101003b");
     }
 
     public static byte[] CreateIco(int width = 16, int height = 16)
@@ -222,6 +216,46 @@ public static class ImageTestFixtures
         finalJpg.Write(rawJpg, 2, rawJpg.Length - 2);
 
         return finalJpg.ToArray();
+    }
+
+    public static byte[] CreateMultiFrameIco(params (int width, int height)[] frames)
+    {
+        if (frames.Length == 0) frames = [(16, 16)];
+
+        var frameDataList = frames.Select(f => CreatePng(f.width, f.height, transparent: true)).ToList();
+        using var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+
+        // Header
+        bw.Write((short)0); // reserved
+        bw.Write((short)1); // icon
+        bw.Write((short)frames.Length);
+
+        int currentOffset = 6 + (16 * frames.Length);
+
+        for (int i = 0; i < frames.Length; i++)
+        {
+            var f = frames[i];
+            var data = frameDataList[i];
+
+            bw.Write((byte)(f.width >= 256 ? 0 : f.width));
+            bw.Write((byte)(f.height >= 256 ? 0 : f.height));
+            bw.Write((byte)0);
+            bw.Write((byte)0);
+            bw.Write((short)1);
+            bw.Write((short)32);
+            bw.Write(data.Length);
+            bw.Write(currentOffset);
+
+            currentOffset += data.Length;
+        }
+
+        foreach (var data in frameDataList)
+        {
+            bw.Write(data);
+        }
+
+        return ms.ToArray();
     }
 }
 

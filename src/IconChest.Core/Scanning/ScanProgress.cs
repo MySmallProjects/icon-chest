@@ -44,6 +44,7 @@ public sealed class ScanResult
     public int MissingFiles;
     public int Duplicates;
     public int Errors;
+    public int ThumbnailsEnqueued;
 
     public List<string> WarningsAndErrors { get; } = new();
 }

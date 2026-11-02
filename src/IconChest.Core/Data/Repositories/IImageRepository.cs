@@ -7,7 +7,7 @@ public interface IImageRepository
     ImageRecord? GetById(long id);
     ImageRecord? GetByPathKey(string pathKey);
     Dictionary<string, ImageRecord> GetRecordsByFolder(long folderId);
-    void InsertBatch(IEnumerable<ImageRecord> records);
+    IReadOnlyList<long> InsertBatch(IEnumerable<ImageRecord> records);
     void UpdateTechnicalBatch(IEnumerable<ImageRecord> records);
     void UpdateMoveBatch(IEnumerable<ImageMoveUpdate> moves);
     void MarkMissingBatch(IEnumerable<long> imageIds, string missingSinceUtc);

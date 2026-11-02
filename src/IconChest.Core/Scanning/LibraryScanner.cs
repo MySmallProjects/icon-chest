@@ -6,6 +6,7 @@ using IconChest.Core.Data.Models;
 using IconChest.Core.Data.Repositories;
 using IconChest.Core.Scanning.Exceptions;
 using IconChest.Core.Settings;
+using IconChest.Core.Thumbnails;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -18,7 +19,7 @@ public sealed class LibraryScanner : ILibraryScanner
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"
     };
 
-    private static readonly ConcurrentDictionary<long, byte> ActiveScans = new();
+    private static readonly ConcurrentDictionary<string, byte> ActiveScans = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ILibraryFolderRepository _folderRepo;
     private readonly IImageRepository _imageRepo;
@@ -27,6 +28,9 @@ public sealed class LibraryScanner : ILibraryScanner
     private readonly IImageMetadataReader _metadataReader;
     private readonly IPathKeyProvider _pathKeyProvider;
     private readonly IClock _clock;
+    private readonly IThumbnailQueue? _thumbnailQueue;
+    private readonly ThumbnailWorker? _thumbnailWorker;
+    private readonly IThumbnailProvider? _thumbnailProvider;
     private readonly ILogger<LibraryScanner> _logger;
 
     public LibraryScanner(
@@ -37,6 +41,9 @@ public sealed class LibraryScanner : ILibraryScanner
         IImageMetadataReader metadataReader,
         IPathKeyProvider? pathKeyProvider = null,
         IClock? clock = null,
+        IThumbnailQueue? thumbnailQueue = null,
+        ThumbnailWorker? thumbnailWorker = null,
+        IThumbnailProvider? thumbnailProvider = null,
         ILogger<LibraryScanner>? logger = null)
     {
         _folderRepo = folderRepo;
@@ -46,6 +53,9 @@ public sealed class LibraryScanner : ILibraryScanner
         _metadataReader = metadataReader;
         _pathKeyProvider = pathKeyProvider ?? PathKeyProvider.Default;
         _clock = clock ?? SystemClock.Instance;
+        _thumbnailQueue = thumbnailQueue;
+        _thumbnailWorker = thumbnailWorker;
+        _thumbnailProvider = thumbnailProvider;
         _logger = logger ?? NullLogger<LibraryScanner>.Instance;
     }
 
@@ -70,26 +80,24 @@ public sealed class LibraryScanner : ILibraryScanner
 
     public async Task<ScanResult> ScanAsync(long folderId, IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        if (!ActiveScans.TryAdd(folderId, 0))
+        var folder = _folderRepo.GetById(folderId);
+        if (folder == null)
+        {
+            return new ScanResult { FolderId = folderId, IsFatalError = true, FatalErrorMessage = $"Folder with ID {folderId} not found." };
+        }
+
+        var scanKey = Path.GetFullPath(folder.Path);
+        if (!ActiveScans.TryAdd(scanKey, 0))
         {
             throw new ScanAlreadyRunningException(folderId);
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var result = new ScanResult { FolderId = folderId };
+        var result = new ScanResult { FolderId = folderId, FolderPath = folder.Path };
         var throttler = new ProgressThrottler(progress);
 
         try
         {
-            var folder = _folderRepo.GetById(folderId);
-            if (folder == null)
-            {
-                result.IsFatalError = true;
-                result.FatalErrorMessage = $"Folder with ID {folderId} not found.";
-                return result;
-            }
-
-            result.FolderPath = folder.Path;
             _logger.LogInformation("Starting scan of library folder {FolderId}: {FolderPath}", folderId, folder.Path);
             throttler.Report(ScanStage.Starting, result, null, force: true);
 
@@ -243,8 +251,8 @@ public sealed class LibraryScanner : ILibraryScanner
                                 FileName = item.FileName,
                                 Extension = item.Ext,
                                 Format = meta.Format,
-                                Width = meta.Width,
-                                Height = meta.Height,
+                                Width = meta.Width ?? 0,
+                                Height = meta.Height ?? 0,
                                 SizeBytes = meta.SizeBytes,
                                 Hash = hash,
                                 HashAlgo = _hasher.AlgorithmName,
@@ -272,8 +280,8 @@ public sealed class LibraryScanner : ILibraryScanner
                                 FileName = item.FileName,
                                 Extension = item.Ext,
                                 Format = meta.Format,
-                                Width = meta.Width,
-                                Height = meta.Height,
+                                Width = meta.Width ?? 0,
+                                Height = meta.Height ?? 0,
                                 SizeBytes = meta.SizeBytes,
                                 Hash = hash,
                                 HashAlgo = _hasher.AlgorithmName,
@@ -393,11 +401,13 @@ public sealed class LibraryScanner : ILibraryScanner
                 }
             }
 
+            var insertedIds = new List<long>();
             if (actualNewInserts.Count > 0)
             {
                 foreach (var batch in actualNewInserts.Chunk(500))
                 {
-                    _imageRepo.InsertBatch(batch);
+                    var ids = _imageRepo.InsertBatch(batch);
+                    insertedIds.AddRange(ids);
                 }
             }
 
@@ -420,6 +430,7 @@ public sealed class LibraryScanner : ILibraryScanner
                 if (settings.AutoRemoveMissing)
                 {
                     _imageRepo.DeleteMissingForFolder(folderId);
+                    _thumbnailProvider?.CleanupOrphans();
                 }
             }
 
@@ -430,6 +441,30 @@ public sealed class LibraryScanner : ILibraryScanner
 
             // 11. Update last scan timestamp
             _folderRepo.UpdateLastScan(folderId, _clock.UtcNow.ToString("o"));
+
+            // 12. Enqueue thumbnail jobs for new, changed, moved and restored images
+            if (!result.IsCancelled && !result.IsFatalError && _thumbnailQueue != null)
+            {
+                try
+                {
+                    var targetImageIds = new List<long>();
+                    targetImageIds.AddRange(insertedIds);
+                    targetImageIds.AddRange(changedRecordsToUpdate.Select(c => c.Id));
+                    targetImageIds.AddRange(moveUpdates.Select(m => m.Id));
+                    targetImageIds.AddRange(restoredIds);
+
+                    if (targetImageIds.Count > 0)
+                    {
+                        result.ThumbnailsEnqueued = _thumbnailQueue.EnqueueForImages(targetImageIds);
+                        _thumbnailWorker?.NotifyWorkAvailable();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to enqueue thumbnail jobs after scan.");
+                }
+            }
+
             throttler.Report(ScanStage.Completed, result, null, force: true);
 
             _logger.LogInformation("Completed scan of folder {FolderId}. Found: {Found}, New: {New}, Changed: {Changed}, Unchanged: {Unchanged}, Moved: {Moved}, Missing: {Missing}, Duplicates: {Dupes}",
@@ -441,7 +476,7 @@ public sealed class LibraryScanner : ILibraryScanner
         {
             stopwatch.Stop();
             result.Duration = stopwatch.Elapsed;
-            ActiveScans.TryRemove(folderId, out _);
+            ActiveScans.TryRemove(scanKey, out _);
         }
     }
 

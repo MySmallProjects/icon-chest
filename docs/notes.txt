@@ -235,33 +235,215 @@ Manual CLI Walkthrough
 ```bash
 # 1. Build CLI
 dotnet build src/IconChest.Cli
+
 # 2. Add a folder to the library
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder add /path/to/my/icons
+
 # 3. Verify duplicate and nested folder rejections
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder add /path/to/my/icons
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder add /path/to/my/icons/subfolder
+
 # 4. Perform an initial scan
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest scan 1
+
 # 5. Inspect database statistics and list images
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest db stats
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest list
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest show 1
+
 # 6. Test incremental scan (0 new, 0 changed)
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest scan 1
+
 # 7. Test file move detection
 mv /path/to/my/icons/sub/icon.png /path/to/my/icons/moved_icon.png
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest scan 1   # Displays "Moved: 1"
+
 # 8. Test duplicate recomputation when hiding an image
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest image hide 1
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest db stats
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest image unhide 1
+
 # 9. Test non-destructive folder removal
 ./src/IconChest.Cli/bin/Debug/net10.0/iconchest folder remove 1
 ```
 
 
 
+
+
+
+
+
 ---
+
+
+# Phase 3 - Completion Summary
+
+IconChest Phase 3: Thumbnails — Complete
+
+Phase 3 (Thumbnails) has been implemented and verified. All unit tests pass, the full solution builds cleanly with zero warnings/errors, and the explicit 2,000-image benchmark completes with high throughput.
+
+1. What was built
+
+a) Schema Migration 0003_thumbnails.sql:
+
+Dropped the unpopulated Phase 1 thumbnail_job table.
+Created the persistent thumbnail table keyed by (hash, size) with states (pending, running, done, failed, evicted, orphaned), priorities, retries (attempts, next_attempt_utc), dimensions, byte size, access timestamps, and claim timestamps.
+Added indexes: idx_thumbnail_claim for prioritized job claiming and idx_thumbnail_evict for LRU cache eviction.
+Updated schema version to 3.
+
+b) Settings Additions (AppSettings):
+
+ThumbnailQuality: Integer between 1 and 100 (default 85).
+ThumbnailWorkers: Worker count where 0 = Auto (min(4, Environment.ProcessorCount)), or explicit positive integer (default 0).
+Validation and cloning tests updated.
+
+c) Skia Thumbnail Renderer (IThumbnailRenderer / SkiaThumbnailRenderer):
+
+High-quality bicubic downscaling using Mitchell filter with premultiplied alpha (preventing edge halo artifacts).
+Preserves aspect ratio without upscaling raster images (images smaller than target dimensions keep natural dimensions).
+Vector SVG exception: Small SVGs scale up cleanly to fill the target box while preserving aspect ratio.
+Automatic EXIF orientation normalization.
+Multi-frame selection: largest frame for ICO, first frame for animated GIF/WebP/PNG.
+Security guards: 200-megapixel decompression bomb guard, SVG script/external entity protection, and 10-second timeout.
+Typed error results: Unreadable, TooLarge, Timeout, Unsupported.
+
+d) Thumbnail Disk Cache (IThumbnailCache / ThumbnailCache):
+
+Fan-out layout: <cache>/<first 2 hex of hash>/<hash>_<size>.webp.
+Atomic writes using temporary files (.tmp) and atomic replacement.
+Stale .tmp file cleanup on startup.
+Total byte calculation and selective deletion.
+
+e) Persistent Thumbnail Queue (IThumbnailQueue / ThumbnailQueue):
+
+Idempotent enqueueing: EnqueueForImages, EnqueueForFolder, EnqueueAll.
+3 sizes per distinct hash (64, 128, 256). Duplicates share jobs and missing/unreadable files are skipped.
+Never re-enqueues evicted rows automatically.
+Prioritized FIFO claim order (priority descending, size ascending: 64 
+→
+→ 128 
+→
+→ 256).
+Exponential retry backoff on transient errors (30s 
+→
+→ 2m 
+→
+→ 10m; marked failed after 3 attempts or on deterministic errors).
+Crash recovery (RecoverInterruptedJobs) and manual retry (RetryFailed).
+
+f) Background Worker Engine (ThumbnailWorker):
+
+Concurrency controlled by ThumbnailWorkers setting.
+Event-driven wakeup via NotifyWorkAvailable() with delayed-retry polling fallback.
+Graceful cancellation (StopAsync) and pause/resume coordination.
+Automatic cache eviction check when the queue drains.
+
+g) Thumbnail Provider (IThumbnailProvider / ThumbnailProvider):
+
+GetAsync(imageId, size) returning Ready, Pending, Failed, or NotFound.
+Self-healing: Automatically re-enqueues if a disk file is unexpectedly deleted.
+ETag generation ("{hash}_{size}_{bytes}").
+Periodic batched access-time tracking (flushed every 30 seconds).
+LRU cache eviction down to 90% when disk usage exceeds ThumbnailCacheMaxMb.
+ThumbnailSizes.PickFor(displayPixels) helper.
+
+h) Orphan Cleanup and Scanner Integration:
+
+CleanupOrphans() wired into LibraryFolderService.RemoveFolder and missing file cleanup.
+LibraryScanner enqueues new/changed/moved/restored images upon scan completion and reports ThumbnailsEnqueued in scan results.
+
+i) CLI Commands (iconchest thumbs ...):
+
+iconchest thumbs status: Summary of queue states, sizes, and cache size.
+iconchest thumbs enqueue [--folder <id>]: Enqueues images into the thumbnail queue.
+iconchest thumbs run [--until-empty]: Runs workers in foreground with live rate/ETA.
+iconchest thumbs retry-failed: Resets failed thumbnail jobs back to pending.
+iconchest thumbs clear: Deletes all cached WebP files and resets queue records.
+iconchest thumbs verify: Validates cache files against database records and restores missing ones.
+iconchest thumbs cleanup: Purges orphaned thumbnails and disk files.
+iconchest thumbs show <id>: Displays thumbnail paths and states for an image.
+iconchest thumbs make <file> --size N --out <path>: Renders an on-demand thumbnail directly.
+
+
+
+2. Test & Benchmark Results
+
+Unit Tests:
+
+bash
+XDG_RUNTIME_DIR=/tmp dotnet test --filter "Category!=Explicit"
+IconChest.Core.Tests: 130 passed, 0 failed, 0 skipped
+IconChest.Api.Tests: 1 passed, 0 failed, 0 skipped
+Total: 131 passed
+
+Explicit 2,000-Image Benchmark:
+
+bash
+XDG_RUNTIME_DIR=/tmp dotnet test tests/IconChest.Core.Tests --filter "FullyQualifiedName~ThumbnailPerformance" --logger "console;verbosity=detailed"
+1 Worker: Processed 3,000 jobs in 17,337 ms (173.0 jobs/sec, 57.7 images/sec).
+4 Workers: Processed 3,000 jobs in 17,596 ms (170.5 jobs/sec, 56.8 images/sec).
+Status: 6,000 jobs completed, 0 failed, 0 pending.
+
+
+
+
+3. How to Test Phase 3
+
+Note
+ - Path may need changing to run. 
+ - Database IDs maybe different. 
+ - You'll need to set the path for /path/to/images
+
+To test Phase 3 manually with the developer CLI:
+
+```bash
+# 1. Initialize or migrate the database
+sudo ./src/IconChest.Cli/bin/Debug/net10.0/iconchest db init
+
+# 2. Add and scan a folder with images
+sudo ./iconchest folder add /path/to/images
+sudo ./iconchest scan 1
+
+# 3. Check queue status (3 jobs per distinct hash)
+sudo ./iconchest thumbs status
+
+# 4. Generate thumbnails until queue is empty
+sudo ./iconchest thumbs run --until-empty
+
+# 5. Inspect generated thumbnails for image #1
+sudo ./iconchest thumbs show 1
+
+# 6. Verify cache consistency
+sudo ./iconchest thumbs verify
+
+# 7. Render a standalone thumbnail to disk
+sudo ./iconchest thumbs make /path/to/sample.png --size 128 --out /tmp/sample_128.webp
+```
+
+sudo ./iconchest thumbs make /home/user/Pictures/bookshelf2.jpg --size 128 --out /tmp/sample_128.webp
+
+
+---------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

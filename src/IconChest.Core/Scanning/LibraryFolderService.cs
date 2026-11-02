@@ -10,15 +10,18 @@ public sealed class LibraryFolderService : ILibraryFolderService
 {
     private readonly ILibraryFolderRepository _repository;
     private readonly IPathKeyProvider _pathKeyProvider;
+    private readonly Thumbnails.IThumbnailProvider? _thumbnailProvider;
     private readonly ILogger<LibraryFolderService> _logger;
 
     public LibraryFolderService(
         ILibraryFolderRepository repository,
         IPathKeyProvider? pathKeyProvider = null,
+        Thumbnails.IThumbnailProvider? thumbnailProvider = null,
         ILogger<LibraryFolderService>? logger = null)
     {
         _repository = repository;
         _pathKeyProvider = pathKeyProvider ?? PathKeyProvider.Default;
+        _thumbnailProvider = thumbnailProvider;
         _logger = logger ?? NullLogger<LibraryFolderService>.Instance;
     }
 
@@ -89,6 +92,7 @@ public sealed class LibraryFolderService : ILibraryFolderService
         }
 
         _repository.Remove(id);
+        _thumbnailProvider?.CleanupOrphans();
         _logger.LogInformation("Removed library folder {Id}: {Path}", id, folder.Path);
     }
 

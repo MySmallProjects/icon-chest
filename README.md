@@ -120,8 +120,54 @@ Compute the standalone XxHash128 hash of any file:
 iconchest hash /path/to/file.png
 ```
 
-### 4. Database Operations
-Initialize or migrate the database (migrations 0001 and 0002):
+### 4. Thumbnail Operations
+Inspect the state of the thumbnail queue and disk cache:
+```bash
+iconchest thumbs status
+```
+
+Enqueue images for thumbnail generation:
+```bash
+iconchest thumbs enqueue [--folder <id>]
+```
+
+Run thumbnail workers interactively:
+```bash
+iconchest thumbs run [--until-empty]
+```
+
+Reset failed thumbnail jobs back to pending:
+```bash
+iconchest thumbs retry-failed
+```
+
+Render an on-demand single thumbnail directly to an output file:
+```bash
+iconchest thumbs make /path/to/image.png --size 128 --out /tmp/thumb.webp
+```
+
+Display thumbnail cache status and paths for an image:
+```bash
+iconchest thumbs show <imageId>
+```
+
+Audit and verify the thumbnail cache against database records:
+```bash
+iconchest thumbs verify
+```
+
+Purge orphaned thumbnails and clean up disk files:
+```bash
+iconchest thumbs cleanup
+```
+
+Clear all cached thumbnail files and reset the queue:
+```bash
+iconchest thumbs clear
+```
+
+### 5. Database Operations
+Initialize or migrate the database (migrations 0001, 0002, and 0003):
 ```bash
 iconchest db init
 ```
@@ -136,7 +182,7 @@ View database entity counts and statistics:
 iconchest db stats
 ```
 
-### 5. Settings Operations
+### 6. Settings Operations
 Show full configuration:
 ```bash
 iconchest settings show
@@ -145,12 +191,13 @@ Read a specific setting:
 ```bash
 iconchest settings get theme
 ```
-Update a setting:
+Update a setting (e.g. `thumbnailQuality`, `thumbnailWorkers`, `thumbnailCacheMaxMb`):
 ```bash
-iconchest settings set theme Dark
+iconchest settings set thumbnailQuality 90
+iconchest settings set thumbnailWorkers 4
 ```
 
-### 6. Logging and Diagnostics
+### 7. Logging and Diagnostics
 Print version info:
 ```bash
 iconchest version

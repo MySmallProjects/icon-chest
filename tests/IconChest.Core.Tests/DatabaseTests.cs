@@ -25,8 +25,8 @@ public class DatabaseTests
             Assert.Equal(0, initialVersion);
 
             var migratedVersion = db.Migrate();
-            Assert.Equal(2, migratedVersion);
-            Assert.Equal(2, db.GetSchemaVersion());
+            Assert.Equal(3, migratedVersion);
+            Assert.Equal(3, db.GetSchemaVersion());
 
             // Check tables exist
             using var conn = db.OpenConnection();
@@ -36,7 +36,7 @@ public class DatabaseTests
             Assert.Contains("image", tables);
             Assert.Contains("tag", tables);
             Assert.Contains("image_tag", tables);
-            Assert.Contains("thumbnail_job", tables);
+            Assert.Contains("thumbnail", tables);
         }
         finally
         {
@@ -52,8 +52,8 @@ public class DatabaseTests
         {
             var v1 = db.Migrate();
             var v2 = db.Migrate();
-            Assert.Equal(2, v1);
-            Assert.Equal(2, v2);
+            Assert.Equal(3, v1);
+            Assert.Equal(3, v2);
         }
         finally
         {
@@ -77,7 +77,7 @@ public class DatabaseTests
 
             var ex = Assert.Throws<SchemaVersionException>(() => db.Migrate());
             Assert.Equal(99, ex.DatabaseVersion);
-            Assert.Equal(2, ex.SupportedVersion);
+            Assert.Equal(3, ex.SupportedVersion);
         }
         finally
         {
@@ -221,20 +221,17 @@ public class DatabaseTests
 
             var tagId = conn.QuerySingle<long>("INSERT INTO tag (name) VALUES ('TestTag') RETURNING id;");
             conn.Execute("INSERT INTO image_tag (image_id, tag_id) VALUES (@imageId, @tagId);", new { imageId, tagId });
-            conn.Execute("INSERT INTO thumbnail_job (image_id, size, updated_utc) VALUES (@imageId, 64, '2026-11-01');", new { imageId });
 
             // Verify row counts before delete
             Assert.Equal(1, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM image;"));
             Assert.Equal(1, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM image_tag;"));
-            Assert.Equal(1, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM thumbnail_job;"));
 
             // Delete library folder
             conn.Execute("DELETE FROM library_folder WHERE id = @folderId;", new { folderId });
 
-            // Cascading delete must have cleaned up image, image_tag, and thumbnail_job
+            // Cascading delete must have cleaned up image and image_tag
             Assert.Equal(0, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM image;"));
             Assert.Equal(0, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM image_tag;"));
-            Assert.Equal(0, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM thumbnail_job;"));
             Assert.Equal(1, conn.ExecuteScalar<int>("SELECT COUNT(*) FROM tag;")); // Tag itself remains
         }
         finally
@@ -341,9 +338,9 @@ public class DatabaseTests
         var (db, tempFile) = CreateTempFileDb();
         try
         {
-            // Initial migration succeeds to version 2
+            // Initial migration succeeds to version 3
             db.Migrate();
-            Assert.Equal(2, db.GetSchemaVersion());
+            Assert.Equal(3, db.GetSchemaVersion());
 
             // Execute an explicit failed migration block within transaction
             using (var conn = db.OpenConnection())
@@ -354,7 +351,7 @@ public class DatabaseTests
                     conn.Execute("CREATE TABLE temp_rollback_test (id INTEGER PRIMARY KEY);", transaction: tx);
                     // Invalid SQL statement to trigger failure
                     conn.Execute("INSERT INTO non_existent_table VALUES (1);", transaction: tx);
-                    conn.Execute("INSERT INTO schema_version (version, applied_utc, description) VALUES (3, '2026-11-01', 'Fail');", transaction: tx);
+                    conn.Execute("INSERT INTO schema_version (version, applied_utc, description) VALUES (4, '2026-11-01', 'Fail');", transaction: tx);
                     tx.Commit();
                 }
                 catch
@@ -362,11 +359,11 @@ public class DatabaseTests
                     tx.Rollback();
                 }
 
-                // Verify temp_rollback_test was rolled back and schema_version is still 2
+                // Verify temp_rollback_test was rolled back and schema_version is still 3
                 var tableExists = conn.ExecuteScalar<int>("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'temp_rollback_test';");
                 Assert.Equal(0, tableExists);
                 var maxVersion = conn.ExecuteScalar<int>("SELECT MAX(version) FROM schema_version;");
-                Assert.Equal(2, maxVersion);
+                Assert.Equal(3, maxVersion);
             }
         }
         finally

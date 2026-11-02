@@ -65,6 +65,8 @@ public sealed class AppSettings
     public string? DbPath { get; set; } = null;
     public string? ThumbnailCachePath { get; set; } = null;
     public int ThumbnailCacheMaxMb { get; set; } = 2048;
+    public int ThumbnailQuality { get; set; } = 85;
+    public int ThumbnailWorkers { get; set; } = 0;
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AppLogLevel LogLevel { get; set; } = AppLogLevel.Information;
@@ -97,6 +99,16 @@ public sealed class AppSettings
         if (ThumbnailCacheMaxMb < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(ThumbnailCacheMaxMb), "Thumbnail cache max size cannot be negative.");
+        }
+
+        if (ThumbnailQuality < 1 || ThumbnailQuality > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ThumbnailQuality), "Thumbnail quality must be between 1 and 100.");
+        }
+
+        if (ThumbnailWorkers < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ThumbnailWorkers), "Thumbnail workers cannot be negative.");
         }
 
         if (ScanWorkers < 0)
@@ -138,6 +150,8 @@ public sealed class AppSettings
             DbPath = DbPath,
             ThumbnailCachePath = ThumbnailCachePath,
             ThumbnailCacheMaxMb = ThumbnailCacheMaxMb,
+            ThumbnailQuality = ThumbnailQuality,
+            ThumbnailWorkers = ThumbnailWorkers,
             LogLevel = LogLevel,
             Theme = Theme,
             GridCaption = GridCaption,

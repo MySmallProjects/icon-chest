@@ -7,6 +7,7 @@ using IconChest.Core.Data.Repositories;
 using IconChest.Core.Logging;
 using IconChest.Core.Scanning;
 using IconChest.Core.Settings;
+using IconChest.Core.Thumbnails;
 using IconChest.Core.Versioning;
 using Microsoft.Extensions.Logging;
 
@@ -39,6 +40,7 @@ public static class Program
                 "show" => HandleShow(cmdArgs),
                 "hash" => await HandleHashAsync(cmdArgs),
                 "image" => HandleImage(cmdArgs),
+                "thumbs" => await HandleThumbsAsync(cmdArgs),
                 _ => UnknownCommand(command)
             };
         }
@@ -70,6 +72,15 @@ public static class Program
         Console.WriteLine("  show <image id>                      Display all metadata and EXIF for an image");
         Console.WriteLine("  hash <file>                          Compute XxHash128 for any file");
         Console.WriteLine("  image hide|unhide <id>               Toggle hidden state of an image");
+        Console.WriteLine("  thumbs status                        Show thumbnail queue status and cache size");
+        Console.WriteLine("  thumbs enqueue [--folder <id>]       Enqueue thumbnail generation jobs");
+        Console.WriteLine("  thumbs run [--until-empty]           Run background worker to process queue");
+        Console.WriteLine("  thumbs retry-failed                  Reset failed thumbnail jobs to pending");
+        Console.WriteLine("  thumbs clear [--yes]                 Clear all thumbnail files and database rows");
+        Console.WriteLine("  thumbs verify                        Verify cache and restore missing / delete stale files");
+        Console.WriteLine("  thumbs cleanup                       Clean up orphaned thumbnail records and files");
+        Console.WriteLine("  thumbs show <image id>               Display thumbnail state and paths for an image");
+        Console.WriteLine("  thumbs make <file> --size N --out <path>  Render a single file for visual checking");
     }
 
     private static int UnknownCommand(string command)
@@ -81,7 +92,14 @@ public static class Program
         return 1;
     }
 
-    private static (IconChestDatabase Db, LibraryFolderRepository FolderRepo, ImageRepository ImageRepo, SettingsService Settings) CreateContext()
+    private static (IconChestDatabase Db,
+                    LibraryFolderRepository FolderRepo,
+                    ImageRepository ImageRepo,
+                    SettingsService Settings,
+                    ThumbnailCache Cache,
+                    ThumbnailQueue Queue,
+                    SkiaThumbnailRenderer Renderer,
+                    ThumbnailProvider Provider) CreateContext()
     {
         var paths = new AppPaths();
         var settingsService = new SettingsService(paths);
@@ -91,8 +109,12 @@ public static class Program
         var connFactory = new DatabaseConnectionFactory(db.DatabasePath);
         var folderRepo = new LibraryFolderRepository(connFactory);
         var imageRepo = new ImageRepository(connFactory);
+        var cache = new ThumbnailCache(settingsService);
+        var queue = new ThumbnailQueue(connFactory);
+        var renderer = new SkiaThumbnailRenderer();
+        var provider = new ThumbnailProvider(connFactory, queue, cache, settingsService);
 
-        return (db, folderRepo, imageRepo, settingsService);
+        return (db, folderRepo, imageRepo, settingsService, cache, queue, renderer, provider);
     }
 
     private static int HandleVersion()
@@ -323,7 +345,7 @@ public static class Program
         }
 
         var sub = args[0].ToLowerInvariant();
-        var (db, _, imageRepo, _) = CreateContext();
+        var (db, _, imageRepo, _, _, _, _, _) = CreateContext();
 
         switch (sub)
         {
@@ -368,8 +390,8 @@ public static class Program
         }
 
         var sub = args[0].ToLowerInvariant();
-        var (_, folderRepo, _, _) = CreateContext();
-        var folderService = new LibraryFolderService(folderRepo);
+        var (_, folderRepo, _, _, _, _, _, provider) = CreateContext();
+        var folderService = new LibraryFolderService(folderRepo, thumbnailProvider: provider);
 
         switch (sub)
         {
@@ -462,14 +484,16 @@ public static class Program
             return 1;
         }
 
-        var (_, folderRepo, imageRepo, settingsService) = CreateContext();
-        var folderService = new LibraryFolderService(folderRepo);
+        var (_, folderRepo, imageRepo, settingsService, cache, queue, renderer, provider) = CreateContext();
+        var folderService = new LibraryFolderService(folderRepo, thumbnailProvider: provider);
         var scanner = new LibraryScanner(
             folderRepo,
             imageRepo,
             settingsService,
             new XxHash128Hasher(),
-            new ImageMetadataReader());
+            new ImageMetadataReader(),
+            thumbnailQueue: queue,
+            thumbnailProvider: provider);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (sender, eventArgs) =>
@@ -546,6 +570,7 @@ public static class Program
         Console.WriteLine($"  Missing:    {r.MissingFiles}");
         Console.WriteLine($"  Duplicates: {r.Duplicates}");
         Console.WriteLine($"  Errors:     {r.Errors}");
+        Console.WriteLine($"  Thumbnails: {r.ThumbnailsEnqueued} enqueued");
 
         if (r.WarningsAndErrors.Count > 0)
         {
@@ -592,7 +617,7 @@ public static class Program
             }
         }
 
-        var (_, _, imageRepo, _) = CreateContext();
+        var (_, _, imageRepo, _, _, _, _, _) = CreateContext();
         var images = imageRepo.List(folderId, includeHidden, includeMissing, duplicatesOnly, limit: limit, offset: 0);
         var total = imageRepo.Count(folderId, includeHidden, includeMissing, duplicatesOnly);
 
@@ -625,7 +650,7 @@ public static class Program
             return 1;
         }
 
-        var (_, _, imageRepo, _) = CreateContext();
+        var (_, _, imageRepo, _, _, _, _, _) = CreateContext();
         var img = imageRepo.GetById(id);
         if (img == null)
         {
@@ -716,7 +741,7 @@ public static class Program
             return 1;
         }
 
-        var (_, _, imageRepo, _) = CreateContext();
+        var (_, _, imageRepo, _, _, _, _, _) = CreateContext();
         var img = imageRepo.GetById(id);
         if (img == null)
         {
@@ -738,6 +763,262 @@ public static class Program
                 return 0;
             default:
                 Console.Error.WriteLine($"Unknown image subcommand: '{sub}'");
+                return 1;
+        }
+    }
+
+    private static async Task<int> HandleThumbsAsync(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("Missing thumbs subcommand: status, enqueue, run, retry-failed, clear, verify, cleanup, show, make");
+            return 1;
+        }
+
+        var sub = args[0].ToLowerInvariant();
+        var (_, folderRepo, imageRepo, settingsService, cache, queue, renderer, provider) = CreateContext();
+
+        switch (sub)
+        {
+            case "status":
+            {
+                var status = queue.GetStatus();
+                var totalBytes = cache.GetTotalBytes();
+                var maxMb = settingsService.Current.ThumbnailCacheMaxMb;
+
+                Console.WriteLine("Thumbnail Queue Status:");
+                Console.WriteLine($"  Total Jobs:     {status.TotalJobs}");
+                Console.WriteLine($"  Pending:        {status.Pending}");
+                Console.WriteLine($"  Running:        {status.Running}");
+                Console.WriteLine($"  Done:           {status.Done}");
+                Console.WriteLine($"  Failed:         {status.Failed}");
+                Console.WriteLine($"  Evicted:        {status.Evicted}");
+                Console.WriteLine($"  Orphaned:       {status.Orphaned}");
+                Console.WriteLine();
+                Console.WriteLine("Counts by Size:");
+                foreach (var size in ThumbnailSizes.All)
+                {
+                    Console.WriteLine($"  {size}x{size}:       {status.CountsBySize.GetValueOrDefault(size, 0)}");
+                }
+                Console.WriteLine();
+                Console.WriteLine("Cache Information:");
+                Console.WriteLine($"  Location:       {cache.CacheDirectory}");
+                Console.WriteLine($"  Current Size:   {FormatBytes(totalBytes)}");
+                Console.WriteLine($"  Max Size:       {(maxMb > 0 ? $"{maxMb} MB" : "Unlimited")}");
+                if (status.ItemsPerSecond > 0.05)
+                {
+                    Console.WriteLine($"  Throughput:     {status.ItemsPerSecond:F1} items/sec");
+                }
+                if (status.EstimatedTimeRemaining.HasValue)
+                {
+                    Console.WriteLine($"  Estimated ETA:  {status.EstimatedTimeRemaining.Value.TotalSeconds:F0}s");
+                }
+                return 0;
+            }
+            case "enqueue":
+            {
+                long? folderId = null;
+                for (int i = 1; i < args.Length; i++)
+                {
+                    if (args[i] is "--folder" or "-f" && i + 1 < args.Length)
+                    {
+                        if (long.TryParse(args[i + 1], out var fid)) folderId = fid;
+                    }
+                }
+
+                int enqueued = folderId.HasValue
+                    ? queue.EnqueueForFolder(folderId.Value)
+                    : queue.EnqueueAll();
+
+                Console.WriteLine($"Enqueued {enqueued} thumbnail jobs.");
+                return 0;
+            }
+            case "run":
+            {
+                bool untilEmpty = args.Any(a => a.Equals("--until-empty", StringComparison.OrdinalIgnoreCase));
+                var worker = new ThumbnailWorker(queue, cache, renderer, settingsService, provider);
+
+                using var cts = new CancellationTokenSource();
+                Console.CancelKeyPress += (sender, eventArgs) =>
+                {
+                    eventArgs.Cancel = true;
+                    Console.WriteLine();
+                    Console.WriteLine("Stopping thumbnail worker (finishing current job)...");
+                    cts.Cancel();
+                };
+
+                worker.Start();
+                Console.WriteLine($"Thumbnail worker started (until-empty: {untilEmpty}). Press Ctrl+C to stop.");
+
+                while (!cts.IsCancellationRequested)
+                {
+                    var status = queue.GetStatus();
+                    var etaStr = status.EstimatedTimeRemaining.HasValue
+                        ? $"{status.EstimatedTimeRemaining.Value.TotalSeconds:F0}s"
+                        : "N/A";
+
+                    Console.Write($"\r[Running] Pending: {status.Pending} | Running: {status.Running} | Done: {status.Done} | Failed: {status.Failed} | Rate: {status.ItemsPerSecond:F1}/s | ETA: {etaStr,-6}");
+
+                    if (untilEmpty && status.Pending == 0 && status.Running == 0)
+                    {
+                        break;
+                    }
+
+                    try
+                    {
+                        await Task.Delay(300, cts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+
+                Console.WriteLine();
+                await worker.StopAsync();
+                var finalStatus = queue.GetStatus();
+                Console.WriteLine($"Worker finished. Done: {finalStatus.Done}, Pending: {finalStatus.Pending}, Failed: {finalStatus.Failed}.");
+                return 0;
+            }
+            case "retry-failed":
+            {
+                int reset = queue.RetryFailed();
+                Console.WriteLine($"Reset {reset} failed jobs to pending.");
+                return 0;
+            }
+            case "clear":
+            {
+                bool assumeYes = args.Any(a => a is "--yes" or "-y");
+                if (!assumeYes)
+                {
+                    Console.Write("Clear all thumbnail files and database records? (y/N): ");
+                    var ans = Console.ReadLine();
+                    if (!string.Equals(ans?.Trim(), "y", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(ans?.Trim(), "yes", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine("Operation cancelled.");
+                        return 0;
+                    }
+                }
+
+                await provider.ClearCacheAsync();
+                Console.WriteLine("Thumbnail cache and records cleared.");
+                return 0;
+            }
+            case "verify":
+            {
+                Console.WriteLine("Verifying thumbnail cache...");
+                var report = await provider.VerifyCacheAsync();
+                Console.WriteLine("Cache Verification Report:");
+                Console.WriteLine($"  Total Done Records Checked: {report.TotalChecked}");
+                Console.WriteLine($"  Valid Thumbnails On Disk:   {report.ValidDone}");
+                Console.WriteLine($"  Restored to Pending:        {report.MissingFileRestoredToPending}");
+                Console.WriteLine($"  Stale Disk Files Deleted:   {report.StaleFilesDeleted}");
+                return 0;
+            }
+            case "cleanup":
+            {
+                int count = provider.CleanupOrphans();
+                Console.WriteLine($"Cleaned up {count} orphaned thumbnail entries.");
+                return 0;
+            }
+            case "show":
+            {
+                if (args.Length < 2 || !long.TryParse(args[1], out var imgId))
+                {
+                    Console.Error.WriteLine("Usage: iconchest thumbs show <image id>");
+                    return 1;
+                }
+
+                var img = imageRepo.GetById(imgId);
+                if (img == null)
+                {
+                    Console.Error.WriteLine($"Image with ID {imgId} not found.");
+                    return 1;
+                }
+
+                Console.WriteLine($"Image {img.Id} ({img.FileName}) - Hash: {img.Hash}:");
+                foreach (var size in ThumbnailSizes.All)
+                {
+                    var record = queue.GetRecord(img.Hash, size);
+                    var filePath = cache.GetThumbnailPath(img.Hash, size);
+                    bool exists = File.Exists(filePath);
+                    var state = record?.State ?? "no_record";
+                    var dims = record?.Width > 0 ? $"{record.Width}x{record.Height}" : "N/A";
+                    var bytes = record?.Bytes.HasValue == true ? FormatBytes(record.Bytes.Value) : (exists ? FormatBytes(new FileInfo(filePath).Length) : "N/A");
+
+                    Console.WriteLine($"  Size {size,3}: State={state,-8} Dims={dims,-9} Size={bytes,-9} OnDisk={exists} Path={filePath}");
+                }
+                return 0;
+            }
+            case "make":
+            {
+                if (args.Length < 2)
+                {
+                    Console.Error.WriteLine("Usage: iconchest thumbs make <file> --size N --out <path>");
+                    return 1;
+                }
+
+                var sourceFile = args[1];
+                if (!File.Exists(sourceFile))
+                {
+                    Console.Error.WriteLine($"File not found: {sourceFile}");
+                    return 1;
+                }
+
+                int size = 128;
+                string? outPath = null;
+
+                for (int i = 2; i < args.Length; i++)
+                {
+                    if (args[i] is "--size" or "-s" && i + 1 < args.Length && int.TryParse(args[i + 1], out var s))
+                    {
+                        size = s;
+                        i++;
+                    }
+                    else if (args[i] is "--out" or "-o" && i + 1 < args.Length)
+                    {
+                        outPath = args[i + 1];
+                        i++;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(outPath))
+                {
+                    Console.Error.WriteLine("Error: --out <path> is required.");
+                    return 1;
+                }
+
+                // Refuse if --out is inside a library folder
+                var fullOut = Path.GetFullPath(outPath);
+                var libraryFolders = folderRepo.List();
+                foreach (var lf in libraryFolders)
+                {
+                    var lfFull = Path.GetFullPath(lf.Path);
+                    if (fullOut.StartsWith(lfFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                        fullOut.Equals(lfFull, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.Error.WriteLine($"Error: Output path '{outPath}' is inside library folder '{lf.Path}'. Writing inside library folders is refused.");
+                        return 1;
+                    }
+                }
+
+                var result = await renderer.RenderAsync(sourceFile, size, settingsService.Current.ThumbnailQuality);
+                if (result.Status != ThumbnailRenderStatus.Success || result.Bytes == null)
+                {
+                    Console.Error.WriteLine($"Error rendering thumbnail: {result.ErrorMessage ?? result.Status.ToString()}");
+                    return 1;
+                }
+
+                var outDir = Path.GetDirectoryName(fullOut);
+                if (!string.IsNullOrWhiteSpace(outDir)) Directory.CreateDirectory(outDir);
+
+                await File.WriteAllBytesAsync(fullOut, result.Bytes);
+                Console.WriteLine($"Rendered {size}x{size} thumbnail ({result.Width}x{result.Height}, {FormatBytes(result.Bytes.Length)}) to {outPath}");
+                return 0;
+            }
+            default:
+                Console.Error.WriteLine($"Unknown thumbs subcommand: '{sub}'");
                 return 1;
         }
     }
