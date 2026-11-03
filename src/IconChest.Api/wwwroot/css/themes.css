@@ -4,6 +4,7 @@
   color-scheme: dark;
 
   --bg-app: #0f172a;           /* Slate 900 */
+  --bg-canvas: #0f172a;        /* Slate 900 */
   --bg-surface: #1e293b;       /* Slate 800 */
   --bg-surface-hover: #334155; /* Slate 700 */
   --bg-surface-active: #475569;/* Slate 600 */
@@ -41,6 +42,7 @@
   color-scheme: light;
 
   --bg-app: #f8fafc;           /* Slate 50 */
+  --bg-canvas: #f1f5f9;        /* Slate 100 */
   --bg-surface: #ffffff;       /* White */
   --bg-surface-hover: #f1f5f9; /* Slate 100 */
   --bg-surface-active: #e2e8f0;/* Slate 200 */

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using IconChest.Core.Images;
 using IconChest.Core.Query;
+using IconChest.Core.Scanning;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -77,9 +78,9 @@ public static class QueryEndpoints
         .WithSummary("Returns reference documentation, grammar, fields, errors, limits, and examples for the query language");
 
         // 3. POST /api/query/from-filter
-        group.MapPost("/from-filter", (ImageSearchRequest filter) =>
+        group.MapPost("/from-filter", (ImageSearchRequest filter, ILibraryFolderService folderService) =>
         {
-            var result = SimpleFilterToQuery.Convert(filter);
+            var result = SimpleFilterToQuery.Convert(filter, id => folderService.GetById(id)?.Path);
             return Results.Ok(new FromFilterResponse
             {
                 Success = result.Success,

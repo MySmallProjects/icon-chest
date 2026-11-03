@@ -16,10 +16,12 @@ public enum TagFilterMode
 public sealed class ImageSearchRequest
 {
     public long? FolderId { get; set; }
+    public long? FilterFolderId { get; set; }
     public string? Directory { get; set; }
     public bool IncludeSubfolders { get; set; }
 
     public string DateField { get; set; } = "effective"; // effective | created | modified | taken | added
+    public string RangeField { get; set; } = "effective"; // effective | created | modified | taken | added
     public int? Year { get; set; }
     public bool YearUnknown { get; set; }
     public int? Month { get; set; }
@@ -28,6 +30,9 @@ public sealed class ImageSearchRequest
 
     public List<string>? Tags { get; set; } // tag names or IDs
     public TagFilterMode TagMode { get; set; } = TagFilterMode.Any;
+    public List<string>? FilterTags { get; set; } // tag names or IDs for filter bar
+    public TagFilterMode FilterTagMode { get; set; } = TagFilterMode.Any;
+    public bool? Untagged { get; set; }
 
     public List<string>? Types { get; set; } // format or extension (png, svg, jpg, ...)
 
@@ -40,6 +45,7 @@ public sealed class ImageSearchRequest
     public long? MaxSize { get; set; }
 
     public int? RatingMin { get; set; }
+    public int? RatingMax { get; set; }
     public bool? Favourite { get; set; }
 
     public string? Text { get; set; } // contains search on file_name, title, description

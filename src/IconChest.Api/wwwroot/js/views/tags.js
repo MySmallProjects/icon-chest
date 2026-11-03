@@ -132,6 +132,11 @@ export function createTagsView() {
       loadTags();
       return panelAContent;
     },
+    onActivated: () => {
+      if (typeof browser.onActivated === 'function') {
+        browser.onActivated();
+      }
+    },
     refresh: () => {
       loadTags();
       browser.refresh();

@@ -50,13 +50,33 @@ class Store {
     }
   }
 
-  subscribe(key, listener) {
+  subscribe(keyOrListener, maybeListener) {
+    let key = keyOrListener;
+    let listener = maybeListener;
+
+    if (typeof keyOrListener === 'function') {
+      listener = keyOrListener;
+      key = '*';
+    }
+
+    if (!listener || typeof listener !== 'function') {
+      return () => {};
+    }
+
     if (!this.listeners.has(key)) {
       this.listeners.set(key, new Set());
     }
     this.listeners.get(key).add(listener);
-    // Initial call
-    listener(this.state[key], undefined);
+
+    // Initial call for specific key
+    if (key !== '*') {
+      try {
+        listener(this.state[key], undefined);
+      } catch (err) {
+        console.error(`Error in initial store listener for ${key}:`, err);
+      }
+    }
+
     return () => this.listeners.get(key)?.delete(listener);
   }
 
@@ -68,6 +88,16 @@ class Store {
           cb(value, oldValue);
         } catch (err) {
           console.error(`Error in store listener for ${key}:`, err);
+        }
+      }
+    }
+    const wildcardSubs = this.listeners.get('*');
+    if (wildcardSubs) {
+      for (const cb of wildcardSubs) {
+        try {
+          cb(key, value, oldValue);
+        } catch (err) {
+          console.error(`Error in wildcard store listener for ${key}:`, err);
         }
       }
     }

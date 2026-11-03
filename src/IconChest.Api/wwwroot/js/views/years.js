@@ -160,6 +160,11 @@ export function createYearsView() {
       loadTree();
       return panelAContent;
     },
+    onActivated: () => {
+      if (typeof browser.onActivated === 'function') {
+        browser.onActivated();
+      }
+    },
     refresh: () => {
       loadTree();
       browser.refresh();

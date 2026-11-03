@@ -10,7 +10,7 @@ public sealed record ConvertFilterResult(
 
 public static class SimpleFilterToQuery
 {
-    public static ConvertFilterResult Convert(ImageSearchRequest request)
+    public static ConvertFilterResult Convert(ImageSearchRequest request, Func<long, string?>? folderResolver = null)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -33,7 +33,7 @@ public static class SimpleFilterToQuery
 
         var clauses = new List<string>();
 
-        // 2. Directory & IncludeSubfolders
+        // 2. Directory & IncludeSubfolders (Scope)
         if (!string.IsNullOrWhiteSpace(request.Directory))
         {
             var cleanDir = QueryValidator.NormalizeFolderPath(request.Directory);
@@ -47,10 +47,35 @@ public static class SimpleFilterToQuery
             }
         }
 
-        // 3. Date field & Date filters
+        // 2b. FilterFolderId (Filter bar)
+        if (request.FilterFolderId.HasValue)
+        {
+            string? folderPath = null;
+            if (folderResolver != null)
+            {
+                folderPath = folderResolver(request.FilterFolderId.Value);
+            }
+
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return new ConvertFilterResult(
+                    false,
+                    null,
+                    $"Library folder with ID {request.FilterFolderId.Value} could not be resolved to a path.");
+            }
+
+            var cleanPath = QueryValidator.NormalizeFolderPath(folderPath);
+            clauses.Add($"folder under \"{Escape(cleanPath)}\"");
+        }
+
+        // 3. Date field & Date filters (Year / Month from scope)
         string dateField = ResolveDateField(request.DateField);
 
-        if (request.Year.HasValue && request.Month.HasValue)
+        if (request.YearUnknown)
+        {
+            clauses.Add($"{dateField} is empty");
+        }
+        else if (request.Year.HasValue && request.Month.HasValue)
         {
             clauses.Add($"{dateField} == {request.Year.Value:D4}-{request.Month.Value:D2}");
         }
@@ -59,16 +84,24 @@ public static class SimpleFilterToQuery
             clauses.Add($"{dateField} == {request.Year.Value:D4}");
         }
 
+        // 3b. RangeField (for DateFrom / DateTo from filter bar)
+        string rangeField = ResolveDateField(request.RangeField);
         if (!string.IsNullOrWhiteSpace(request.DateFrom))
         {
-            clauses.Add($"{dateField} >= {request.DateFrom.Trim()}");
+            clauses.Add($"{rangeField} >= {request.DateFrom.Trim()}");
         }
         if (!string.IsNullOrWhiteSpace(request.DateTo))
         {
-            clauses.Add($"{dateField} <= {request.DateTo.Trim()}");
+            clauses.Add($"{rangeField} <= {request.DateTo.Trim()}");
         }
 
-        // 4. Tags
+        // 4. Untagged
+        if (request.Untagged == true)
+        {
+            clauses.Add("tag is empty");
+        }
+
+        // 4b. Scope Tags
         if (request.Tags != null && request.Tags.Count > 0)
         {
             var validTags = request.Tags
@@ -94,6 +127,38 @@ public static class SimpleFilterToQuery
                     else
                     {
                         var inList = string.Join(", ", validTags.Select(t => $"\"{Escape(t)}\""));
+                        clauses.Add($"tag in ({inList})");
+                    }
+                }
+            }
+        }
+
+        // 4c. FilterTags (from filter bar)
+        if (request.FilterTags != null && request.FilterTags.Count > 0)
+        {
+            var validFilterTags = request.FilterTags
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.Trim())
+                .ToList();
+
+            if (validFilterTags.Count > 0)
+            {
+                if (request.FilterTagMode == TagFilterMode.All)
+                {
+                    foreach (var tag in validFilterTags)
+                    {
+                        clauses.Add($"tag == \"{Escape(tag)}\"");
+                    }
+                }
+                else
+                {
+                    if (validFilterTags.Count == 1)
+                    {
+                        clauses.Add($"tag == \"{Escape(validFilterTags[0])}\"");
+                    }
+                    else
+                    {
+                        var inList = string.Join(", ", validFilterTags.Select(t => $"\"{Escape(t)}\""));
                         clauses.Add($"tag in ({inList})");
                     }
                 }
@@ -133,16 +198,61 @@ public static class SimpleFilterToQuery
         if (request.MaxSize.HasValue) clauses.Add($"size <= {request.MaxSize.Value}");
 
         // 8. Rating & Favourite
-        if (request.RatingMin.HasValue) clauses.Add($"rating >= {request.RatingMin.Value}");
+        if (request.RatingMin.HasValue && request.RatingMax.HasValue)
+        {
+            if (request.RatingMin.Value == request.RatingMax.Value)
+            {
+                clauses.Add($"rating == {request.RatingMin.Value}");
+            }
+            else
+            {
+                clauses.Add($"rating >= {request.RatingMin.Value}");
+                if (request.RatingMax.Value == 0)
+                {
+                    clauses.Add("rating == 0");
+                }
+                else
+                {
+                    clauses.Add($"rating <= {request.RatingMax.Value}");
+                }
+            }
+        }
+        else if (request.RatingMin.HasValue)
+        {
+            clauses.Add($"rating >= {request.RatingMin.Value}");
+        }
+        else if (request.RatingMax.HasValue)
+        {
+            if (request.RatingMax.Value == 0)
+            {
+                clauses.Add("rating == 0");
+            }
+            else
+            {
+                clauses.Add($"rating <= {request.RatingMax.Value}");
+            }
+        }
+
         if (request.Favourite.HasValue)
         {
             clauses.Add(request.Favourite.Value ? "favourite" : "favourite == false");
         }
 
-        // 9. Text search
+        // 9. Text search (bare terms ANDed, quoted)
         if (!string.IsNullOrWhiteSpace(request.Text))
         {
-            clauses.Add($"\"{Escape(request.Text.Trim())}\"");
+            var terms = request.Text.Trim()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (terms.Length == 1)
+            {
+                clauses.Add($"\"{Escape(terms[0])}\"");
+            }
+            else if (terms.Length > 1)
+            {
+                var andTerms = string.Join(" and ", terms.Select(t => $"\"{Escape(t)}\""));
+                clauses.Add(andTerms);
+            }
         }
 
         // 10. Inclusion flags
@@ -154,6 +264,9 @@ public static class SimpleFilterToQuery
             case InclusionState.Include:
                 clauses.Add("(hidden == true or hidden == false)");
                 break;
+            case InclusionState.Exclude:
+                // exclude adds nothing (implicit in query engine)
+                break;
         }
 
         switch (request.Missing)
@@ -164,6 +277,9 @@ public static class SimpleFilterToQuery
             case InclusionState.Include:
                 clauses.Add("(missing == true or missing == false)");
                 break;
+            case InclusionState.Exclude:
+                // exclude adds nothing (implicit in query engine)
+                break;
         }
 
         switch (request.Duplicate)
@@ -173,6 +289,9 @@ public static class SimpleFilterToQuery
                 break;
             case InclusionState.Exclude:
                 clauses.Add("duplicate == false");
+                break;
+            case InclusionState.Include:
+                // include adds nothing (default in query engine)
                 break;
         }
 

@@ -132,6 +132,28 @@ export const SHORTCUTS = [
     key: 'Shift + F10 / Menu',
     description: 'Open context menu for focused tag',
     context: 'tags'
+  },
+
+  // Filter Bar & Search (Phase 9)
+  {
+    key: '/',
+    description: 'Focus filter text box or query editor',
+    context: 'filter'
+  },
+  {
+    key: 'Ctrl / Cmd + F',
+    description: 'Focus filter text box or query editor',
+    context: 'filter'
+  },
+  {
+    key: 'Enter',
+    description: 'Apply filters in Simple mode, or run query with Ctrl+Enter',
+    context: 'filter'
+  },
+  {
+    key: 'Escape',
+    description: 'Clear field or dismiss filter bar focus back to grid',
+    context: 'filter'
   }
 ];
 

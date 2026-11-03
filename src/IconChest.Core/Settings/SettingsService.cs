@@ -19,6 +19,7 @@ public sealed class SettingsService : ISettingsService
     private readonly ILogger<SettingsService> _logger;
     private readonly object _lock = new();
     private AppSettings _current;
+    private DateTime _lastLoadedTimeUtc;
 
     public AppSettings Current
     {
@@ -26,6 +27,7 @@ public sealed class SettingsService : ISettingsService
         {
             lock (_lock)
             {
+                CheckForExternalModifications();
                 return _current.Clone();
             }
         }
@@ -51,6 +53,11 @@ public sealed class SettingsService : ISettingsService
         AppSettings updated;
         lock (_lock)
         {
+            // Reload latest state from disk before applying modifications so concurrent processes
+            // (e.g. DesktopApp saving window state while API process saves user settings)
+            // never overwrite each other with stale in-memory state.
+            _current = LoadOrCreateInternal();
+
             var workingCopy = _current.Clone();
             updateAction(workingCopy);
             workingCopy.Validate();
@@ -84,6 +91,26 @@ public sealed class SettingsService : ISettingsService
         SettingsChanged?.Invoke(this, reloaded);
     }
 
+    private void CheckForExternalModifications()
+    {
+        try
+        {
+            var path = _paths.SettingsFilePath;
+            if (File.Exists(path))
+            {
+                var writeTime = File.GetLastWriteTimeUtc(path);
+                if (writeTime > _lastLoadedTimeUtc)
+                {
+                    _current = LoadOrCreateInternal();
+                }
+            }
+        }
+        catch
+        {
+            // Ignore file check errors and retain current settings
+        }
+    }
+
     private AppSettings LoadOrCreateInternal()
     {
         Directory.CreateDirectory(_paths.ConfigDirectory);
@@ -115,6 +142,7 @@ public sealed class SettingsService : ISettingsService
                 SaveInternal(loaded);
             }
 
+            _lastLoadedTimeUtc = File.Exists(settingsPath) ? File.GetLastWriteTimeUtc(settingsPath) : DateTime.UtcNow;
             return loaded;
         }
         catch (Exception ex)
@@ -167,6 +195,7 @@ public sealed class SettingsService : ISettingsService
             var json = JsonSerializer.Serialize(settings, JsonOptions);
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, targetPath, overwrite: true);
+            _lastLoadedTimeUtc = File.GetLastWriteTimeUtc(targetPath);
         }
         catch
         {

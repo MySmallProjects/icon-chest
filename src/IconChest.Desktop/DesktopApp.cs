@@ -32,6 +32,14 @@ public sealed class DesktopApp
 
     public async Task<int> RunAsync(string[] args)
     {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GST_DEBUG")))
+            {
+                Environment.SetEnvironmentVariable("GST_DEBUG", "0");
+            }
+        }
+
         bool browserOnly = args.Any(a => a.Equals("--browser", StringComparison.OrdinalIgnoreCase));
         bool enableDevTools = args.Any(a => a.Equals("--devtools", StringComparison.OrdinalIgnoreCase))
 #if DEBUG
@@ -217,6 +225,16 @@ public sealed class DesktopApp
 
                 var payload = JsonSerializer.Serialize(new { type = "folderPicked", path = selected });
                 _window?.SendWebMessage(payload);
+            }
+            else if (type == "logError")
+            {
+                var errText = root.TryGetProperty("message", out var m) ? m.GetString() : message;
+                var stack = root.TryGetProperty("stack", out var st) ? st.GetString() : null;
+                Console.Error.WriteLine($"[Web View Error] {errText}");
+                if (!string.IsNullOrWhiteSpace(stack))
+                {
+                    Console.Error.WriteLine(stack);
+                }
             }
         }
         catch (Exception ex)

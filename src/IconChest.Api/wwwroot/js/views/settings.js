@@ -74,6 +74,9 @@ export function createSettingsView() {
     sectionSlot.appendChild(target.render());
   }
 
+  // Initial render: show default section
+  showSection('library');
+
   return {
     element: container,
     showSection,

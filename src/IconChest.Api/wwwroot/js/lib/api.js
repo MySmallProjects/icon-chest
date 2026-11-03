@@ -106,6 +106,22 @@ class ApiClient {
     return await this.get(`/api/images/${id}`);
   }
 
+  async validateQuery(text) {
+    return await this.post('/api/query/validate', { text });
+  }
+
+  async getQueryHelp() {
+    return await this.get('/api/query/help');
+  }
+
+  async convertFilterToQuery(filter) {
+    return await this.post('/api/query/from-filter', filter);
+  }
+
+  async getFilterOptions() {
+    return await this.get('/api/filters/options');
+  }
+
   async checkSession() {
     try {
       return await this.get('/api/session');

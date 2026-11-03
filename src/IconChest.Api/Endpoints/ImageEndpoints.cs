@@ -33,6 +33,30 @@ public static class ImageEndpoints
 {
     private static readonly HashSet<int> AllowedThumbnailSizes = new() { 64, 128, 256 };
 
+    private static readonly HashSet<string> FilterParamNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "filterTag",
+        "filterTagMode",
+        "untagged",
+        "filterFolderId",
+        "rangeField",
+        "dateFrom",
+        "dateTo",
+        "type",
+        "minWidth",
+        "maxWidth",
+        "minHeight",
+        "maxHeight",
+        "minSize",
+        "maxSize",
+        "ratingMin",
+        "ratingMax",
+        "text",
+        "hidden",
+        "missing",
+        "duplicate"
+    };
+
     public static void MapImageEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/images").WithTags("Images");
@@ -73,21 +97,15 @@ public static class ImageEndpoints
             if (query.ContainsKey("q"))
             {
                 var qVal = query["q"].ToString();
-                // If any other filter was also passed
-                bool hasOtherFilters = query.Keys.Any(k =>
-                    !k.Equals("q", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("limit", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("offset", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("sort", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("dir", StringComparison.OrdinalIgnoreCase));
+                var offending = query.Keys.Where(k => FilterParamNames.Contains(k)).OrderBy(k => k).ToList();
 
-                if (hasOtherFilters)
+                if (offending.Count > 0)
                 {
                     return EndpointHelpers.ProblemDetails(
                         context,
                         StatusCodes.Status400BadRequest,
                         "Bad Request",
-                        "The 'q' parameter cannot be combined with structured filter parameters.");
+                        $"The 'q' parameter cannot be combined with filter parameters: {string.Join(", ", offending)}.");
                 }
 
                 var compResult = IconChest.Core.Query.QueryEngine.ParseAndCompile(qVal);
@@ -96,8 +114,26 @@ public static class ImageEndpoints
                     return EndpointHelpers.QueryProblemDetails(context, compResult.Errors);
                 }
 
+                var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+                bool yearUnknown = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
+                int? parsedYear = null;
+                if (!yearUnknown && int.TryParse(year, out var yVal))
+                {
+                    parsedYear = yVal;
+                }
+
                 var qRequest = new ImageSearchRequest
                 {
+                    FolderId = folderId,
+                    Directory = directory,
+                    IncludeSubfolders = includeSubfolders ?? false,
+                    DateField = dateField ?? "effective",
+                    Year = parsedYear,
+                    YearUnknown = yearUnknown,
+                    Month = month,
+                    Tags = tagsList.Count > 0 ? tagsList : null,
+                    TagMode = ParseTagMode(tagMode),
+                    Favourite = favourite,
                     Sort = sort ?? "filename",
                     Dir = dir ?? "asc",
                     Offset = offset ?? 0,
@@ -113,29 +149,41 @@ public static class ImageEndpoints
                 return Results.Ok(qResult);
             }
 
-            var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+            var tagsListScope = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
             var typesList = query["type"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+            var filterTagsList = query["filterTag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+            long? filterFolderId = long.TryParse(query["filterFolderId"], out var ffVal) ? ffVal : null;
+            string rangeField = query["rangeField"].ToString();
+            if (string.IsNullOrWhiteSpace(rangeField)) rangeField = "effective";
+            int? ratingMax = int.TryParse(query["ratingMax"], out var rmVal) ? rmVal : null;
+            bool? untagged = bool.TryParse(query["untagged"], out var uVal) ? uVal : null;
+            string? filterTagMode = query["filterTagMode"];
 
-            bool yearUnknown = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
-            int? parsedYear = null;
-            if (!yearUnknown && int.TryParse(year, out var yVal))
+            bool yearUnknownFilter = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
+            int? parsedYearFilter = null;
+            if (!yearUnknownFilter && int.TryParse(year, out var yfVal))
             {
-                parsedYear = yVal;
+                parsedYearFilter = yfVal;
             }
 
             var request = new ImageSearchRequest
             {
                 FolderId = folderId,
+                FilterFolderId = filterFolderId,
                 Directory = directory,
                 IncludeSubfolders = includeSubfolders ?? false,
                 DateField = dateField ?? "effective",
-                Year = parsedYear,
-                YearUnknown = yearUnknown,
+                RangeField = rangeField,
+                Year = parsedYearFilter,
+                YearUnknown = yearUnknownFilter,
                 Month = month,
                 DateFrom = dateFrom,
                 DateTo = dateTo,
-                Tags = tagsList.Count > 0 ? tagsList : null,
+                Tags = tagsListScope.Count > 0 ? tagsListScope : null,
                 TagMode = ParseTagMode(tagMode),
+                FilterTags = filterTagsList.Count > 0 ? filterTagsList : null,
+                FilterTagMode = ParseTagMode(filterTagMode),
+                Untagged = untagged,
                 Types = typesList.Count > 0 ? typesList : null,
                 MinWidth = minWidth,
                 MaxWidth = maxWidth,
@@ -144,6 +192,7 @@ public static class ImageEndpoints
                 MinSize = minSize,
                 MaxSize = maxSize,
                 RatingMin = ratingMin,
+                RatingMax = ratingMax,
                 Favourite = favourite,
                 Text = text,
                 Hidden = ParseInclusion(hidden, InclusionState.Exclude),
@@ -202,20 +251,15 @@ public static class ImageEndpoints
             if (query.ContainsKey("q"))
             {
                 var qVal = query["q"].ToString();
-                bool hasOtherFilters = query.Keys.Any(k =>
-                    !k.Equals("q", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("limit", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("offset", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("sort", StringComparison.OrdinalIgnoreCase) &&
-                    !k.Equals("dir", StringComparison.OrdinalIgnoreCase));
+                var offending = query.Keys.Where(k => FilterParamNames.Contains(k)).OrderBy(k => k).ToList();
 
-                if (hasOtherFilters)
+                if (offending.Count > 0)
                 {
                     return EndpointHelpers.ProblemDetails(
                         context,
                         StatusCodes.Status400BadRequest,
                         "Bad Request",
-                        "The 'q' parameter cannot be combined with structured filter parameters.");
+                        $"The 'q' parameter cannot be combined with filter parameters: {string.Join(", ", offending)}.");
                 }
 
                 var compResult = IconChest.Core.Query.QueryEngine.ParseAndCompile(qVal);
@@ -224,9 +268,27 @@ public static class ImageEndpoints
                     return EndpointHelpers.QueryProblemDetails(context, compResult.Errors);
                 }
 
+                var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+                bool yearUnknown = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
+                int? parsedYear = null;
+                if (!yearUnknown && int.TryParse(year, out var yVal))
+                {
+                    parsedYear = yVal;
+                }
+
                 int qMaxIds = limit ?? 200_000;
                 var qRequest = new ImageSearchRequest
                 {
+                    FolderId = folderId,
+                    Directory = directory,
+                    IncludeSubfolders = includeSubfolders ?? false,
+                    DateField = dateField ?? "effective",
+                    Year = parsedYear,
+                    YearUnknown = yearUnknown,
+                    Month = month,
+                    Tags = tagsList.Count > 0 ? tagsList : null,
+                    TagMode = ParseTagMode(tagMode),
+                    Favourite = favourite,
                     Sort = sort ?? "filename",
                     Dir = dir ?? "asc",
                     Offset = offset ?? 0,
@@ -242,29 +304,41 @@ public static class ImageEndpoints
                 return Results.Ok(qIds);
             }
 
-            var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+            var tagsListScope = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
             var typesList = query["type"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+            var filterTagsList = query["filterTag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+            long? filterFolderId = long.TryParse(query["filterFolderId"], out var ffVal) ? ffVal : null;
+            string rangeField = query["rangeField"].ToString();
+            if (string.IsNullOrWhiteSpace(rangeField)) rangeField = "effective";
+            int? ratingMax = int.TryParse(query["ratingMax"], out var rmVal) ? rmVal : null;
+            bool? untagged = bool.TryParse(query["untagged"], out var uVal) ? uVal : null;
+            string? filterTagMode = query["filterTagMode"];
 
-            bool yearUnknown = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
-            int? parsedYear = null;
-            if (!yearUnknown && int.TryParse(year, out var yVal))
+            bool yearUnknownFilter = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
+            int? parsedYearFilter = null;
+            if (!yearUnknownFilter && int.TryParse(year, out var yfVal))
             {
-                parsedYear = yVal;
+                parsedYearFilter = yfVal;
             }
 
             var request = new ImageSearchRequest
             {
                 FolderId = folderId,
+                FilterFolderId = filterFolderId,
                 Directory = directory,
                 IncludeSubfolders = includeSubfolders ?? false,
                 DateField = dateField ?? "effective",
-                Year = parsedYear,
-                YearUnknown = yearUnknown,
+                RangeField = rangeField,
+                Year = parsedYearFilter,
+                YearUnknown = yearUnknownFilter,
                 Month = month,
                 DateFrom = dateFrom,
                 DateTo = dateTo,
-                Tags = tagsList.Count > 0 ? tagsList : null,
+                Tags = tagsListScope.Count > 0 ? tagsListScope : null,
                 TagMode = ParseTagMode(tagMode),
+                FilterTags = filterTagsList.Count > 0 ? filterTagsList : null,
+                FilterTagMode = ParseTagMode(filterTagMode),
+                Untagged = untagged,
                 Types = typesList.Count > 0 ? typesList : null,
                 MinWidth = minWidth,
                 MaxWidth = maxWidth,
@@ -273,6 +347,7 @@ public static class ImageEndpoints
                 MinSize = minSize,
                 MaxSize = maxSize,
                 RatingMin = ratingMin,
+                RatingMax = ratingMax,
                 Favourite = favourite,
                 Text = text,
                 Hidden = ParseInclusion(hidden, InclusionState.Exclude),

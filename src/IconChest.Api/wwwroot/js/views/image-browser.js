@@ -7,12 +7,14 @@ import { SelectionModel } from '../lib/selection-model.js';
 import { VirtualGrid } from '../components/virtual-grid.js';
 import { DetailsPanel } from '../components/details-panel.js';
 import { PreviewOverlay } from '../components/preview.js';
+import { FilterBar } from '../components/filter-bar.js';
 
 // SVG Icons
 const ICON_ASC = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>';
 const ICON_DESC = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z"/></svg>';
 const ICON_INFO = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>';
 const ICON_BG = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14v12c3.31 0 6-2.69 6-6s-2.69-6-6-6z"/></svg>';
+const ICON_FILTER = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>';
 
 export function createImageBrowser(options = {}) {
   const container = el('div', { className: 'view-container image-browser-view' });
@@ -20,21 +22,46 @@ export function createImageBrowser(options = {}) {
   // Load preferences
   const appSettings = store.get('settings') || {};
   let backgroundMode = localStorage.getItem('iconchest_grid_bg') ||
-    appSettings?.appearance?.transparencyBackground || 'checker';
+    (appSettings?.appearance?.checkerboardMode || appSettings?.checkerboardMode || 'checker').toLowerCase();
   let cellSize = parseInt(localStorage.getItem('iconchest_grid_size') || '160', 10);
   if (isNaN(cellSize) || cellSize < 64 || cellSize > 320) cellSize = 160;
 
   let currentSort = options.defaultSort || 'effectivedate';
   let currentDir = options.defaultDir || 'desc';
-  let filterParams = options.initialFilter || {};
+  let scopeParams = { ...(options.initialFilter || {}) };
+  let userFilterParams = {};
   let currentTitle = options.defaultTitle || 'All Images';
 
-  const captionMode = appSettings?.appearance?.gridCaption || 'filename';
+  let captionMode = (appSettings?.appearance?.gridCaption || appSettings?.gridCaption || 'filename').toLowerCase();
 
   // Instantiate Sub-Systems
   const selectionModel = new SelectionModel();
   let imageSource = null;
   let virtualGrid = null;
+
+  // FilterBar instance - default to closed on program startup
+  let filterBarVisible = false;
+  try {
+    filterBarVisible = sessionStorage.getItem('iconchest_filter_bar_visible') === 'true';
+  } catch {}
+
+  const filterBar = new FilterBar({
+    viewId: options.viewId,
+    onFilterChanged: (filterArgs, isAdvanced, queryText) => {
+      if (isAdvanced) {
+        userFilterParams = queryText ? { q: queryText } : {};
+      } else {
+        userFilterParams = { ...filterArgs };
+      }
+      loadData();
+    },
+    onNavigateHelp: () => {
+      window.location.hash = '#help/query';
+    },
+    onClose: () => {
+      setFilterBarVisible(false);
+    }
+  });
 
   // Preview overlay instance
   const previewOverlay = new PreviewOverlay({
@@ -46,6 +73,7 @@ export function createImageBrowser(options = {}) {
   });
 
   // Details panel instance
+  let infoBtn = null;
   const detailsPanel = new DetailsPanel({
     backgroundMode,
     onRestoreSelection: (ids) => {
@@ -68,6 +96,17 @@ export function createImageBrowser(options = {}) {
       }
       if (options.viewId === 'favourites' && !isFav) {
         loadData();
+      }
+    },
+    onVisibilityChange: (isOpen) => {
+      if (infoBtn) {
+        infoBtn.classList.toggle('active', isOpen);
+      }
+    },
+    onTransitionEnd: () => {
+      if (virtualGrid) {
+        virtualGrid.recalculateLayout();
+        virtualGrid.renderVisible();
       }
     }
   });
@@ -128,11 +167,38 @@ export function createImageBrowser(options = {}) {
     }
   }, [createSvg(ICON_BG)]);
 
-  const infoBtn = el('button', {
+  const filterBtn = el('button', {
     type: 'button',
-    className: 'btn btn-sm browser-info-btn',
-    title: 'Toggle Details Panel',
-    'aria-label': 'Toggle Details Panel',
+    className: `btn btn-sm browser-filter-btn${filterBarVisible ? ' active' : ''}`,
+    title: 'Toggle Filter Bar',
+    'aria-label': 'Toggle Filter Bar',
+    onClick: () => {
+      setFilterBarVisible(!filterBar.isVisible());
+    }
+  }, [createSvg(ICON_FILTER)]);
+
+  function setFilterBarVisible(visible) {
+    filterBarVisible = visible;
+    try {
+      sessionStorage.setItem('iconchest_filter_bar_visible', visible ? 'true' : 'false');
+      localStorage.removeItem('iconchest_filter_bar_visible');
+    } catch {}
+    filterBar.setVisible(visible);
+    if (visible) {
+      filterBtn.classList.add('active');
+    } else {
+      filterBtn.classList.remove('active');
+    }
+  }
+
+  // Set initial visibility
+  filterBar.setVisible(filterBarVisible);
+
+  infoBtn = el('button', {
+    type: 'button',
+    className: `btn btn-sm browser-info-btn${detailsPanel.isOpen ? ' active' : ''}`,
+    title: 'Toggle Details Panel (I)',
+    'aria-label': 'Toggle Details Panel (I)',
     onClick: () => {
       detailsPanel.toggle();
     }
@@ -140,7 +206,7 @@ export function createImageBrowser(options = {}) {
 
   const topToolbar = el('div', { className: 'browser-toolbar' }, [
     el('div', { className: 'browser-toolbar-left' }, [titleEl, countBadgeEl]),
-    el('div', { className: 'browser-toolbar-right' }, [sortSelect, dirBtn, bgBtn, infoBtn])
+    el('div', { className: 'browser-toolbar-right' }, [sortSelect, dirBtn, bgBtn, filterBtn, infoBtn])
   ]);
 
   // Main Working Area (Grid + Details Drawer)
@@ -222,17 +288,48 @@ export function createImageBrowser(options = {}) {
   ]);
 
   container.appendChild(topToolbar);
+  container.appendChild(filterBar.containerEl);
   container.appendChild(mainArea);
   container.appendChild(bottomFooter);
 
-  // 'I' shortcut toggles details panel
-  container.addEventListener('keydown', (e) => {
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
-    if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      detailsPanel.toggle();
+  // Key handlers: '/', 'Ctrl+F', 'I'
+  const handleKeyDown = (e) => {
+    // Only handle if this view container is currently visible in DOM
+    if (!container.isConnected || container.hasAttribute('hidden') || container.style.display === 'none') {
+      return;
     }
-  });
+
+    // Do not intercept if preview overlay is open (preview handles its own shortcuts)
+    if (previewOverlay && previewOverlay.isOpen) {
+      return;
+    }
+
+    // Do not intercept if a modal or confirmation dialog is open
+    if (document.querySelector('.dialog-backdrop, .modal-backdrop')) {
+      return;
+    }
+
+    const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) ||
+      document.activeElement?.isContentEditable;
+
+    if (!isInput) {
+      if (e.key === '/' || ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F'))) {
+        e.preventDefault();
+        setFilterBarVisible(true);
+        filterBar.focus();
+        return;
+      }
+      if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        detailsPanel.toggle();
+        return;
+      }
+    } else if (e.key === 'Escape' && filterBar.containerEl.contains(document.activeElement)) {
+      if (virtualGrid) virtualGrid.focus();
+    }
+  };
+
+  window.addEventListener('keydown', handleKeyDown);
 
   // Build query string
   function buildQueryString(offset, limit) {
@@ -244,15 +341,11 @@ export function createImageBrowser(options = {}) {
     if (typeof offset === 'number') params.set('offset', String(offset));
     if (typeof limit === 'number') params.set('limit', String(limit));
 
-    // Filters
-    for (const [key, value] of Object.entries(filterParams)) {
+    // 1. Scope parameters (from trees / Panel A)
+    for (const [key, value] of Object.entries(scopeParams)) {
       if (value === null || value === undefined || value === '') continue;
 
-      if (key === 'tag' && Array.isArray(value)) {
-        for (const t of value) {
-          if (t) params.append('tag', String(t));
-        }
-      } else if (key === 'tags' && Array.isArray(value)) {
+      if ((key === 'tag' || key === 'tags') && Array.isArray(value)) {
         for (const t of value) {
           if (t) params.append('tag', String(t));
         }
@@ -261,11 +354,79 @@ export function createImageBrowser(options = {}) {
       }
     }
 
+    // 2. User Filter parameters (from FilterBar)
+    if (userFilterParams.q) {
+      params.set('q', userFilterParams.q);
+    } else {
+      for (const [key, value] of Object.entries(userFilterParams)) {
+        if (value === null || value === undefined || value === '') continue;
+
+        if (key === 'type' && Array.isArray(value)) {
+          for (const t of value) {
+            if (t) params.append('type', String(t));
+          }
+        } else if (key === 'filterTag' && Array.isArray(value)) {
+          for (const t of value) {
+            if (t) params.append('filterTag', String(t));
+          }
+        } else {
+          params.set(key, String(value));
+        }
+      }
+    }
+
     return params.toString();
   }
 
   // Data loader
+  function checkPreloadQuery() {
+    const preQuery = store.get('preloadQuery');
+    if (preQuery) {
+      store.set('preloadQuery', null);
+      setFilterBarVisible(true);
+      if (filterBar.currentMode !== 'advanced') {
+        filterBar.switchMode('advanced');
+      }
+      filterBar.queryBox.setQuery(preQuery);
+      userFilterParams = { q: preQuery };
+      loadData();
+      return true;
+    }
+    return false;
+  }
+
+  const unsubscribeStore = store.subscribe('preloadQuery', (val) => {
+    if (val) {
+      checkPreloadQuery();
+    }
+  });
+
+  const unsubscribeSettings = store.subscribe('settings', (newSettings) => {
+    if (!newSettings) return;
+    const newCaption = (newSettings?.appearance?.gridCaption || newSettings?.gridCaption || 'none').toLowerCase();
+    if (virtualGrid && virtualGrid.captionMode !== newCaption) {
+      virtualGrid.setCaptionMode(newCaption);
+    }
+    const newBg = localStorage.getItem('iconchest_grid_bg') ||
+      (newSettings?.appearance?.checkerboardMode || newSettings?.checkerboardMode || 'checker').toLowerCase();
+    if (virtualGrid && virtualGrid.backgroundMode !== newBg) {
+      virtualGrid.setBackgroundMode(newBg);
+    }
+  });
+
   async function loadData() {
+    // Check if a query was preloaded from Help page
+    const preQuery = store.get('preloadQuery');
+    if (preQuery) {
+      store.set('preloadQuery', null);
+      setFilterBarVisible(true);
+      if (filterBar.currentMode !== 'advanced') {
+        filterBar.switchMode('advanced');
+      }
+      filterBar.queryBox.setQuery(preQuery);
+      userFilterParams = { q: preQuery };
+    }
+
     if (imageSource) {
       imageSource.invalidate();
     }
@@ -374,7 +535,7 @@ export function createImageBrowser(options = {}) {
       }
     }
 
-    filterParams = { ...newFilterParams };
+    scopeParams = { ...newFilterParams };
     if (newTitle !== null) {
       currentTitle = newTitle;
       titleEl.textContent = newTitle;
@@ -394,12 +555,32 @@ export function createImageBrowser(options = {}) {
     element: container,
     setFilter,
     refresh,
+    onActivated: () => {
+      checkPreloadQuery();
+      const currentSettings = store.get('settings') || {};
+      const newCaption = (currentSettings?.appearance?.gridCaption || currentSettings?.gridCaption || 'none').toLowerCase();
+      if (virtualGrid && virtualGrid.captionMode !== newCaption) {
+        virtualGrid.setCaptionMode(newCaption);
+      }
+      const newBg = localStorage.getItem('iconchest_grid_bg') ||
+        (currentSettings?.appearance?.checkerboardMode || currentSettings?.checkerboardMode || 'checker').toLowerCase();
+      if (virtualGrid && virtualGrid.backgroundMode !== newBg) {
+        virtualGrid.setBackgroundMode(newBg);
+      }
+    },
     hasUnsavedChanges: () => detailsPanel && detailsPanel.isDirty(),
     getSelectionModel: () => selectionModel,
     getImageSource: () => imageSource,
     getVirtualGrid: () => virtualGrid,
     getDetailsPanel: () => detailsPanel,
-    getPreviewOverlay: () => previewOverlay
+    getPreviewOverlay: () => previewOverlay,
+    getFilterBar: () => filterBar,
+    destroy: () => {
+      if (typeof unsubscribeStore === 'function') unsubscribeStore();
+      if (typeof unsubscribeSettings === 'function') unsubscribeSettings();
+      window.removeEventListener('keydown', handleKeyDown);
+      if (virtualGrid) virtualGrid.destroy();
+    }
   };
 }
 

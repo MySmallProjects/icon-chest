@@ -100,7 +100,11 @@ export function renderLibrarySection() {
   container.appendChild(rulesHeader);
 
   // Include patterns
-  const includeInput = el('input', { type: 'text', className: 'input' });
+  const includeInput = el('input', {
+    type: 'text',
+    className: 'input',
+    value: '*.png;*.svg;*.jpg;*.jpeg;*.webp;*.ico;*.gif'
+  });
   const includeError = el('div', { className: 'form-error' });
   const includeReset = el('a', {
     href: '#',
@@ -113,7 +117,11 @@ export function renderLibrarySection() {
   }, 'Reset to defaults');
 
   // Exclude names
-  const excludeInput = el('input', { type: 'text', className: 'input' });
+  const excludeInput = el('input', {
+    type: 'text',
+    className: 'input',
+    value: '.git;node_modules;.DS_Store;Thumbs.db'
+  });
   const excludeError = el('div', { className: 'form-error' });
   const excludeReset = el('a', {
     href: '#',
@@ -446,24 +454,30 @@ export function renderLibrarySection() {
   async function loadSettings() {
     try {
       const s = await api.get('/api/settings');
-      includeInput.value = (s.scanning?.includePatterns || []).join(';');
-      excludeInput.value = (s.scanning?.excludeNames || []).join(';');
-      startupCheckbox.checked = Boolean(s.scanning?.scanOnStartup);
-    } catch {}
+      const inc = s.includePatterns ?? (Array.isArray(s.scanning?.includePatterns) ? s.scanning.includePatterns.join(';') : s.scanning?.includePatterns);
+      if (inc) {
+        includeInput.value = inc;
+      }
+      const exc = s.excludeNames ?? (Array.isArray(s.scanning?.excludeNames) ? s.scanning.excludeNames.join(';') : s.scanning?.excludeNames);
+      if (exc) {
+        excludeInput.value = exc;
+      }
+      startupCheckbox.checked = Boolean(s.scanOnStartup ?? s.scanning?.scanOnStartup);
+    } catch (err) {
+      console.error('Failed to load scanning settings:', err);
+    }
   }
 
   includeInput.addEventListener('change', () => {
-    const list = includeInput.value.split(';').map(x => x.trim()).filter(Boolean);
-    saveSetting({ scanning: { includePatterns: list } }, includeError);
+    saveSetting({ includePatterns: includeInput.value.trim() }, includeError);
   });
 
   excludeInput.addEventListener('change', () => {
-    const list = excludeInput.value.split(';').map(x => x.trim()).filter(Boolean);
-    saveSetting({ scanning: { excludeNames: list } }, excludeError);
+    saveSetting({ excludeNames: excludeInput.value.trim() }, excludeError);
   });
 
   startupCheckbox.addEventListener('change', () => {
-    saveSetting({ scanning: { scanOnStartup: startupCheckbox.checked } });
+    saveSetting({ scanOnStartup: startupCheckbox.checked });
   });
 
   loadFolders();

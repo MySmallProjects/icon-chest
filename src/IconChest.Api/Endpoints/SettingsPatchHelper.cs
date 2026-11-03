@@ -98,10 +98,12 @@ public static class SettingsPatchHelper
 
                 case "includepatterns":
                     if (val.ValueKind == JsonValueKind.String) clone.IncludePatterns = val.GetString() ?? string.Empty;
+                    else if (val.ValueKind == JsonValueKind.Array) clone.IncludePatterns = string.Join(";", val.EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrWhiteSpace(x)));
                     break;
 
                 case "excludenames":
                     if (val.ValueKind == JsonValueKind.String) clone.ExcludeNames = val.GetString() ?? string.Empty;
+                    else if (val.ValueKind == JsonValueKind.Array) clone.ExcludeNames = string.Join(";", val.EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrWhiteSpace(x)));
                     break;
 
                 case "scanonstartup":
@@ -162,6 +164,80 @@ public static class SettingsPatchHelper
                                             restartRequired.Add("api.allowLan");
                                         }
                                     }
+                                    break;
+                            }
+                        }
+                    }
+                    break;
+
+                case "scanning":
+                    if (val.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var sc in val.EnumerateObject())
+                        {
+                            switch (sc.Name.ToLowerInvariant())
+                            {
+                                case "includepatterns":
+                                    if (sc.Value.ValueKind == JsonValueKind.String) clone.IncludePatterns = sc.Value.GetString() ?? string.Empty;
+                                    else if (sc.Value.ValueKind == JsonValueKind.Array) clone.IncludePatterns = string.Join(";", sc.Value.EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrWhiteSpace(x)));
+                                    break;
+                                case "excludenames":
+                                    if (sc.Value.ValueKind == JsonValueKind.String) clone.ExcludeNames = sc.Value.GetString() ?? string.Empty;
+                                    else if (sc.Value.ValueKind == JsonValueKind.Array) clone.ExcludeNames = string.Join(";", sc.Value.EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrWhiteSpace(x)));
+                                    break;
+                                case "scanonstartup":
+                                    if (sc.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) clone.ScanOnStartup = sc.Value.GetBoolean();
+                                    break;
+                                case "scanworkers":
+                                    if (sc.Value.TryGetInt32(out var swk)) clone.ScanWorkers = swk;
+                                    break;
+                                case "autoremovemissing":
+                                    if (sc.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) clone.AutoRemoveMissing = sc.Value.GetBoolean();
+                                    break;
+                            }
+                        }
+                    }
+                    break;
+
+                case "appearance":
+                    if (val.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var app in val.EnumerateObject())
+                        {
+                            switch (app.Name.ToLowerInvariant())
+                            {
+                                case "theme":
+                                    if (app.Value.ValueKind == JsonValueKind.String && Enum.TryParse<AppTheme>(app.Value.GetString(), ignoreCase: true, out var appTh)) clone.Theme = appTh;
+                                    break;
+                                case "gridcaption":
+                                    if (app.Value.ValueKind == JsonValueKind.String && Enum.TryParse<GridCaptionMode>(app.Value.GetString(), ignoreCase: true, out var appGc)) clone.GridCaption = appGc;
+                                    break;
+                                case "checkerboardmode":
+                                    if (app.Value.ValueKind == JsonValueKind.String && Enum.TryParse<CheckerboardMode>(app.Value.GetString(), ignoreCase: true, out var appCm)) clone.CheckerboardMode = appCm;
+                                    break;
+                                case "previewinfooverlaydefault":
+                                    if (app.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) clone.PreviewInfoOverlayDefault = app.Value.GetBoolean();
+                                    break;
+                            }
+                        }
+                    }
+                    break;
+
+                case "behaviour":
+                    if (val.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var beh in val.EnumerateObject())
+                        {
+                            switch (beh.Name.ToLowerInvariant())
+                            {
+                                case "defaultview":
+                                    if (beh.Value.ValueKind == JsonValueKind.String) clone.DefaultView = beh.Value.GetString() ?? "Folders";
+                                    break;
+                                case "rememberwindowstate":
+                                    if (beh.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) clone.RememberWindowState = beh.Value.GetBoolean();
+                                    break;
+                                case "confirmbeforedelete":
+                                    if (beh.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) clone.ConfirmBeforeDelete = beh.Value.GetBoolean();
                                     break;
                             }
                         }

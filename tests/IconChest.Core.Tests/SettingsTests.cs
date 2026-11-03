@@ -274,5 +274,48 @@ public class SettingsTests
         var settings = new AppSettings { ThumbnailWorkers = -1 };
         Assert.Throws<ArgumentOutOfRangeException>(() => settings.Validate());
     }
+
+    [Fact]
+    public void MultiProcess_UpdatesDoNotOverwriteExternalChanges()
+    {
+        var (desktopService, configDir, dataDir) = CreateTestContext();
+        try
+        {
+            // Desktop process starts up with initial settings (Theme = Light, DefaultView = Folders)
+            Assert.Equal(AppTheme.Light, desktopService.Current.Theme);
+            Assert.Equal("Folders", desktopService.Current.DefaultView);
+
+            // API child process starts up with its own SettingsService instance
+            var paths = new AppPaths(configDirOverride: configDir, dataDirOverride: dataDir, isWindowsOverride: false);
+            var apiService = new SettingsService(paths);
+
+            // User changes Theme to Dark and DefaultView to Tags via API
+            apiService.Update(s =>
+            {
+                s.Theme = AppTheme.Dark;
+                s.DefaultView = "Tags";
+            });
+
+            // Desktop window closes and flushes window coordinates
+            desktopService.Update(s =>
+            {
+                s.Window.Width = 1717;
+                s.Window.Height = 898;
+            });
+
+            // Verify that settings on disk retained Theme = Dark and DefaultView = Tags, plus new window size
+            var reloadedService = new SettingsService(paths);
+            var reloaded = reloadedService.Current;
+            Assert.Equal(AppTheme.Dark, reloaded.Theme);
+            Assert.Equal("Tags", reloaded.DefaultView);
+            Assert.Equal(1717, reloaded.Window.Width);
+            Assert.Equal(898, reloaded.Window.Height);
+        }
+        finally
+        {
+            var parent = Path.GetDirectoryName(configDir);
+            if (parent != null && Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+        }
+    }
 }
 

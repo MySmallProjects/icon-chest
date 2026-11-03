@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 using IconChest.Api.Endpoints;
 using IconChest.Api.Security;
 using IconChest.Api.Services;
@@ -192,6 +193,11 @@ builder.Services.AddHostedService(sp => new ParentProcessMonitorService(
 bool isDevelopment = builder.Environment.IsDevelopment();
 bool enableSwagger = enableSwaggerCli || isDevelopment;
 
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -282,6 +288,7 @@ app.MapFolderEndpoints();
 app.MapTreeEndpoints();
 app.MapTagEndpoints();
 app.MapImageEndpoints();
+app.MapFilterEndpoints();
 app.MapQueryEndpoints();
 app.MapDuplicateEndpoints();
 app.MapMissingEndpoints();

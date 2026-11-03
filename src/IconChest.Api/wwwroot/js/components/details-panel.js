@@ -28,6 +28,8 @@ export class DetailsPanel {
     this.onSelectImage = options.onSelectImage || null;
     this.onSaveSuccess = options.onSaveSuccess || null;
     this.onFavouriteToggled = options.onFavouriteToggled || null;
+    this.onVisibilityChange = options.onVisibilityChange || null;
+    this.onTransitionEnd = options.onTransitionEnd || null;
 
     this.editModel = null;
     this._currentData = null; // raw details or summary
@@ -104,6 +106,18 @@ export class DetailsPanel {
 
     // Initial state: hidden
     this.containerEl.classList.add('collapsed');
+    this.containerEl.classList.add('not-animated');
+    this.containerEl.setAttribute('aria-hidden', 'true');
+    this.containerEl.setAttribute('inert', '');
+    setTimeout(() => {
+      this.containerEl.classList.remove('not-animated');
+    }, 100);
+
+    this.containerEl.addEventListener('transitionend', (e) => {
+      if (e.propertyName === 'margin-right' && typeof this.onTransitionEnd === 'function') {
+        this.onTransitionEnd();
+      }
+    });
 
     // Ctrl+S / Cmd+S handler
     this.containerEl.addEventListener('keydown', (e) => {
@@ -222,9 +236,7 @@ export class DetailsPanel {
   openByUser() {
     this.userClosed = false;
     this._slideIn();
-    if (this.selectedIds.length > 0) {
-      this._renderContent();
-    }
+    this._renderContent();
   }
 
   async closeByUser() {
@@ -253,12 +265,22 @@ export class DetailsPanel {
 
   _slideIn() {
     this.isOpen = true;
+    this.containerEl.removeAttribute('aria-hidden');
+    this.containerEl.removeAttribute('inert');
     this.containerEl.classList.remove('collapsed');
+    if (typeof this.onVisibilityChange === 'function') {
+      this.onVisibilityChange(true);
+    }
   }
 
   _slideOut() {
     this.isOpen = false;
+    this.containerEl.setAttribute('aria-hidden', 'true');
+    this.containerEl.setAttribute('inert', '');
     this.containerEl.classList.add('collapsed');
+    if (typeof this.onVisibilityChange === 'function') {
+      this.onVisibilityChange(false);
+    }
   }
 
   revert() {

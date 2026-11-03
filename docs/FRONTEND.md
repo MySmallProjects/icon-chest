@@ -126,4 +126,24 @@ All algorithms that do not require DOM access are isolated into testable, data-a
 * `lib/dialog.js`: Three-button unsaved changes guard (Save, Discard, Cancel; Cancel strictly preserves focus and selection state), Rename dialog, Recolour dialog with swatches and live contrast warning, Delete confirmation dialog respecting `confirmBeforeDelete`.
 * `components/details-panel.js`: Full editable details drawer with sticky header dirty indicator, single and bulk multi-edit (up to 10,000 images), rating star picker, local native file launcher (`POST /api/native/open-file`), duplicates list (`GET /api/images/{id}/duplicates`), and `Ctrl+S` / `Cmd+S` keyboard save shortcut.
 
+## 7. Phase 9: Filtering, Search and Help Architecture
+
+### 7.1 Scope versus Filter Partition Rule
+* **Partition Rule**: `q` (Advanced query) may be combined with scope parameters (`folderId`, `directory`, `includeSubfolders`, `year`, `month`, `dateField`, `tag`, `tagMode`, `favourite`, `limit`, `offset`, `sort`, `dir`), but combining `q` with structured filter parameters returns `400 Bad Request` naming the offending parameters.
+* **AND Combination**: Scope and filter parameters always combine with SQL `AND`.
+* **Structured Filter Mapping**: `rangeField` (`effective`, `created`, `modified`, `taken`, `added`) directs `dateFrom`/`dateTo`. `ratingMax=0` maps to unrated images. `SimpleFilterToQuery` converts any structured filter into an equivalent query string guaranteeing identical result IDs.
+
+### 7.2 Pure Front-End Modules
+* `lib/filter-model.js`: Pure Simple filter state model, date presets with injectable clock (`today`, `yesterday`, `last7days`, `last30days`, `thisMonth`, `lastMonth`, `thisYear`, `lastYear`), dirty detection (`isFilterDirty`), parameter mapping (`filterStateToParams`), active filter chip generation and removal, and view-specific control visibility.
+* `lib/query-box-model.js`: Live query validation state machine with 250ms debouncing, stale response cancellation/rejection, UTF-16 error position to selection range mapping, and recent queries storage (max 20 items, deduplicated, persistent in `localStorage`).
+* `lib/help-render.js`: Pure safe DOM builder generating the interactive documentation from `shortcuts.js` and `/api/query/help` (strictly no `innerHTML` on server data), with "Try it" buttons that navigate and run queries in the image browser.
+
+### 7.3 UI Components & Interactions
+* `components/filter-bar.js`: WAI-ARIA tabbed filter bar (`role="tablist"` with `Simple` and `Advanced` tabs). Includes live dirty state indicator on the Filter button, "Clear", and "Convert to query" button invoking `POST /api/query/from-filter`. Tab switching includes a non-blocking toast with an "Undo" action if previous filters/query were active.
+* `components/query-box.js`: Advanced query editor with syntax textarea, live validation indicator, clickable syntax error pills that highlight error spans in the textarea, Examples and Recent queries dropdowns, Run, Clear, and Help deep link.
+* `components/active-filters.js`: Active filter chips with removal buttons, and active scope badge.
+* `views/help.js`: Full-width Panel B view with sub-navigation supporting deep links (`#help/shortcuts`, `#help/query`, `#help/filters`, `#help/tips`).
+* **Keyboard Shortcuts**: `/` and `Ctrl/Cmd + F` focus the filter bar across all image views. `Enter` in Simple mode triggers Apply. `Escape` clears the focused input or dismisses focus back to the grid.
+
+
 

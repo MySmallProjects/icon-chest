@@ -11,6 +11,11 @@ export function createFavouritesView() {
 
   return {
     element: browser.element,
+    onActivated: () => {
+      if (typeof browser.onActivated === 'function') {
+        browser.onActivated();
+      }
+    },
     refresh: () => {
       browser.refresh();
     }

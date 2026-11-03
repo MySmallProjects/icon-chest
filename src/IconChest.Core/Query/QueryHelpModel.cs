@@ -16,7 +16,10 @@ public sealed record ErrorHelpItem(
 public sealed record ExampleHelpItem(
     string Text,
     string Description,
-    string Category);
+    string Category)
+{
+    public string Query => Text;
+}
 
 public sealed record GrammarHelp(
     string Summary,

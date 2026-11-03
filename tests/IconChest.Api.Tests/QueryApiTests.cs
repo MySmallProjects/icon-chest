@@ -186,6 +186,93 @@ public class QueryApiTests
     }
 
     [Fact]
+    public async Task SearchImages_WithQAndScopeParams_Succeeds()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        // q combined with scope parameters like year, month, favourite
+        var response = await client.GetAsync("/api/images?q=rating%20%3E%3D%200&year=2026&favourite=true");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        Assert.True(doc.RootElement.TryGetProperty("items", out _));
+    }
+
+    [Fact]
+    public async Task SearchImages_WithQAndFilterParams_Returns400NamingOffendingParams()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        // q combined with filterTag, ratingMax, and minWidth
+        var response = await client.GetAsync("/api/images?q=favourite&filterTag=ui&ratingMax=3&minWidth=100");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.Contains("filterTag", json);
+        Assert.Contains("ratingMax", json);
+        Assert.Contains("minWidth", json);
+    }
+
+    [Fact]
+    public async Task FilterOptions_ReturnsFormatsFoldersAndDates()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        var response = await client.GetAsync("/api/filters/options");
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"Status {response.StatusCode}, Body: {json}");
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.True(root.TryGetProperty("formats", out var formats));
+        Assert.Equal(JsonValueKind.Array, formats.ValueKind);
+        Assert.True(root.TryGetProperty("folders", out var folders));
+        Assert.Equal(JsonValueKind.Array, folders.ValueKind);
+        Assert.True(root.TryGetProperty("minEffectiveDate", out _));
+        Assert.True(root.TryGetProperty("maxEffectiveDate", out _));
+    }
+
+    [Fact]
+    public async Task FromFilterEndpoint_ConvertsAllFilterParameters()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        var payload = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                filterTags = new[] { "ui", "icon" },
+                filterTagMode = "any",
+                rangeField = "created",
+                dateFrom = "2026-01-01",
+                dateTo = "2026-12-31",
+                ratingMax = 0,
+                text = "search button",
+                hidden = "only",
+                duplicate = "exclude"
+            }),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await client.PostAsync("/api/query/from-filter", payload);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.True(root.GetProperty("success").GetBoolean());
+        var query = root.GetProperty("text").GetString();
+        Assert.NotNull(query);
+        Assert.Contains("tag in (\"ui\", \"icon\")", query);
+        Assert.Contains("created >=", query);
+        Assert.Contains("rating == 0", query);
+        Assert.Contains("\"search\" and \"button\"", query);
+        Assert.Contains("hidden == true", query);
+        Assert.Contains("duplicate == false", query);
+    }
+
+    [Fact]
     public async Task GetImageIds_WithQ_Succeeds()
     {
         var client = await _factory.CreateAuthenticatedClientAsync();

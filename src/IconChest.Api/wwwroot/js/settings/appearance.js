@@ -24,7 +24,8 @@ export function renderAppearanceSection() {
     document.documentElement.setAttribute('data-theme', val);
     document.documentElement.style.colorScheme = val;
     store.set('theme', val);
-    saveSetting({ appearance: { theme: val } });
+    try { localStorage.setItem('iconchest_theme', val); } catch {}
+    saveSetting({ theme: val, appearance: { theme: val } });
   });
 
   // 2. Grid Caption Selection
@@ -35,7 +36,7 @@ export function renderAppearanceSection() {
   );
 
   captionSelect.addEventListener('change', () => {
-    saveSetting({ appearance: { gridCaption: captionSelect.value } });
+    saveSetting({ gridCaption: captionSelect.value, appearance: { gridCaption: captionSelect.value } });
   });
 
   // 3. Checkerboard Mode Selection
@@ -46,14 +47,15 @@ export function renderAppearanceSection() {
   );
 
   checkerSelect.addEventListener('change', () => {
-    saveSetting({ appearance: { checkerboardMode: checkerSelect.value } });
+    try { localStorage.setItem('iconchest_grid_bg', checkerSelect.value); } catch {}
+    saveSetting({ checkerboardMode: checkerSelect.value, appearance: { checkerboardMode: checkerSelect.value } });
   });
 
   // 4. Preview Info Overlay Default
   const overlayCheckbox = el('input', { type: 'checkbox', id: 'setting-preview-overlay' });
 
   overlayCheckbox.addEventListener('change', () => {
-    saveSetting({ appearance: { previewInfoOverlayDefault: overlayCheckbox.checked } });
+    saveSetting({ previewInfoOverlayDefault: overlayCheckbox.checked, appearance: { previewInfoOverlayDefault: overlayCheckbox.checked } });
   });
 
   const card = el('div', { className: 'card' },
@@ -84,18 +86,17 @@ export function renderAppearanceSection() {
 
   // Load existing settings
   api.get('/api/settings').then(s => {
-    if (s.appearance) {
-      if (s.appearance.theme) {
-        themeSelect.value = s.appearance.theme.toLowerCase();
-      }
-      if (s.appearance.gridCaption) {
-        captionSelect.value = s.appearance.gridCaption.toLowerCase();
-      }
-      if (s.appearance.checkerboardMode) {
-        checkerSelect.value = s.appearance.checkerboardMode.toLowerCase();
-      }
-      overlayCheckbox.checked = Boolean(s.appearance.previewInfoOverlayDefault);
-    }
+    const theme = (s.appearance?.theme || s.theme || 'dark').toLowerCase();
+    themeSelect.value = theme;
+
+    const caption = (s.appearance?.gridCaption || s.gridCaption || 'none').toLowerCase();
+    captionSelect.value = caption;
+
+    const checker = (s.appearance?.checkerboardMode || s.checkerboardMode || 'checker').toLowerCase();
+    checkerSelect.value = checker;
+
+    const overlay = s.appearance?.previewInfoOverlayDefault ?? s.previewInfoOverlayDefault ?? true;
+    overlayCheckbox.checked = Boolean(overlay);
   }).catch(() => {});
 
   return container;

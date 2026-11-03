@@ -27,12 +27,16 @@ export async function saveSetting(patchObject, errorElement = null, revertFn = n
 
   try {
     const res = await api.patch('/api/settings', patchObject);
-    if (res?.restartRequired) {
+    if (res?.restartRequired && (Array.isArray(res.restartRequired) ? res.restartRequired.length > 0 : true)) {
       showRestartBanner('One or more modified settings will take effect after restarting IconChest.');
     }
     // Update store cache
-    const current = store.get('settings') || {};
-    store.set('settings', { ...current, ...patchObject });
+    if (res?.settings) {
+      store.set('settings', res.settings);
+    } else {
+      const current = store.get('settings') || {};
+      store.set('settings', { ...current, ...patchObject });
+    }
     return res;
   } catch (err) {
     if (err instanceof ApiError) {

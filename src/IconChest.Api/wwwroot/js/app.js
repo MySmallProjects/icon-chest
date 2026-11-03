@@ -63,9 +63,9 @@ class IconChestApp {
     await this._loadInitialState();
     this._buildLayout();
     this._initEvents();
-    this._handleRoute();
 
     window.addEventListener('hashchange', () => this._handleRoute());
+    this._handleRoute();
   }
 
   _initNativeBridge() {
@@ -94,28 +94,33 @@ class IconChestApp {
   }
 
   async _authenticate() {
-    // 1. Session check
+    // 1. Check for Browser / Window Handoff Fragment (#handoff=<secret>)
+    let handoffSecret = null;
+    const hash = window.location.hash;
+    if (hash.includes('handoff=')) {
+      const match = hash.match(/handoff=([^&]+)/);
+      if (match && match[1]) {
+        handoffSecret = decodeURIComponent(match[1]);
+        // Clear fragment immediately from URL and history so secret is not exposed and routing is not corrupted
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+
+    // 2. Session check
     const session = await api.checkSession();
     if (session.authenticated) {
       return true;
     }
 
-    // 2. Browser / Window Handoff Fragment (#handoff=<secret>)
-    const hash = window.location.hash;
-    if (hash.includes('handoff=')) {
-      const match = hash.match(/handoff=([^&]+)/);
-      if (match && match[1]) {
-        const secret = decodeURIComponent(match[1]);
-        // Clear fragment immediately from URL and history so secret is not exposed
-        history.replaceState(null, '', window.location.pathname + window.location.search);
-        try {
-          await api.loginWithSecret(secret);
-          return true;
-        } catch {}
-      }
+    // 3. Login with handoff secret if present
+    if (handoffSecret) {
+      try {
+        await api.loginWithSecret(handoffSecret);
+        return true;
+      } catch {}
     }
 
-    // 3. Desktop Photino Message Bridge
+    // 4. Desktop Photino Message Bridge
     if (window.external && typeof window.external.sendMessage === 'function') {
       try {
         const secret = await new Promise((resolve, reject) => {
@@ -241,12 +246,11 @@ class IconChestApp {
       store.set('settings', settings);
       store.set('systemInfo', systemInfo);
 
-      if (settings?.appearance?.theme) {
-        const theme = settings.appearance.theme.toLowerCase();
-        document.documentElement.setAttribute('data-theme', theme);
-        document.documentElement.style.colorScheme = theme;
-        store.set('theme', theme);
-      }
+      const theme = (settings?.appearance?.theme || settings?.theme || 'dark').toLowerCase();
+      document.documentElement.setAttribute('data-theme', theme);
+      document.documentElement.style.colorScheme = theme;
+      store.set('theme', theme);
+      try { localStorage.setItem('iconchest_theme', theme); } catch {}
     } catch (err) {
       console.warn('Could not load initial settings/diagnostics:', err);
     }
@@ -421,52 +425,73 @@ class IconChestApp {
   }
 
   _handleRoute() {
-    let hash = window.location.hash.replace(/^#/, '');
-    if (!hash) {
-      const defaultView = store.get('settings')?.behaviour?.defaultView || 'folders';
-      hash = defaultView.toLowerCase();
-    }
-
-    const [viewId, subParam] = hash.split('/');
-    const reg = VIEW_REGISTRY.find(v => v.id === viewId) || VIEW_REGISTRY[0];
-
-    store.set('activeView', reg.id);
-
-    // Update active icon bar button
-    for (const [id, btn] of this.iconButtons) {
-      if (id === reg.id) {
-        btn.classList.add('active');
-        btn.setAttribute('aria-current', 'page');
-      } else {
-        btn.classList.remove('active');
-        btn.removeAttribute('aria-current');
+    try {
+      let hash = window.location.hash.replace(/^#/, '');
+      if (!hash || hash.startsWith('handoff=')) {
+        const settings = store.get('settings');
+        const defaultView = (settings?.behaviour?.defaultView || settings?.defaultView || 'folders').toLowerCase();
+        hash = defaultView;
+        window.location.hash = `#${defaultView}`;
       }
-    }
 
-    // Mount or activate view in Panel B
-    let viewInstance = this.views.get(reg.id);
-    if (!viewInstance) {
-      viewInstance = reg.createView();
-      this.views.set(reg.id, viewInstance);
-      this.panelBEl.appendChild(viewInstance.element);
-    }
+      const [viewId, subParam] = hash.split('/');
+      const reg = VIEW_REGISTRY.find(v => v.id === viewId) || VIEW_REGISTRY[0];
 
-    // Hide other views, show active view
-    for (const [id, inst] of this.views) {
-      if (id === reg.id) {
-        inst.element.removeAttribute('hidden');
-      } else {
-        inst.element.setAttribute('hidden', '');
+      store.set('activeView', reg.id);
+
+      // Update active icon bar button
+      for (const [id, btn] of this.iconButtons) {
+        if (id === reg.id) {
+          btn.classList.add('active');
+          btn.setAttribute('aria-current', 'page');
+        } else {
+          btn.classList.remove('active');
+          btn.removeAttribute('aria-current');
+        }
       }
-    }
 
-    // If settings view, activate specific sub-section
-    if (reg.id === 'settings' && viewInstance.showSection) {
-      viewInstance.showSection(subParam || 'library');
-    }
+      // Mount or activate view in Panel B
+      let viewInstance = this.views.get(reg.id);
+      if (!viewInstance) {
+        viewInstance = reg.createView();
+        this.views.set(reg.id, viewInstance);
+        const viewEl = viewInstance.element || viewInstance.containerEl;
+        if (viewEl) {
+          this.panelBEl.appendChild(viewEl);
+        }
+      }
 
-    // Update Panel A content and visibility
-    this._updatePanelAVisibility(reg, viewInstance);
+      // Hide other views, show active view
+      for (const [id, inst] of this.views) {
+        const viewEl = inst?.element || inst?.containerEl;
+        if (viewEl) {
+          if (id === reg.id) {
+            viewEl.removeAttribute('hidden');
+          } else {
+            viewEl.setAttribute('hidden', '');
+          }
+        }
+      }
+
+      // If settings view, activate specific sub-section
+      if (reg.id === 'settings' && viewInstance.showSection) {
+        viewInstance.showSection(subParam || 'library');
+      }
+
+      // If help view, activate specific sub-section
+      if (reg.id === 'help' && viewInstance.showSection) {
+        viewInstance.showSection(subParam || 'shortcuts');
+      }
+
+      if (typeof viewInstance.onActivated === 'function') {
+        viewInstance.onActivated();
+      }
+
+      // Update Panel A content and visibility
+      this._updatePanelAVisibility(reg, viewInstance);
+    } catch (err) {
+      console.error('Routing error in IconChest:', err);
+    }
   }
 
   _updatePanelAVisibility(reg, viewInstance = null) {

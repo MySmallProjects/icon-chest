@@ -87,39 +87,32 @@ public static class SystemEndpoints
         .WithName("Shutdown")
         .WithSummary("Initiates graceful shutdown of the API host (loopback only)");
 
+        // 3b. POST /api/system/client-log
+        group.MapPost("/system/client-log", (
+            JsonElement body,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("ClientBrowser");
+            var msg = body.TryGetProperty("message", out var m) ? m.GetString() : "Unknown client error";
+            var stack = body.TryGetProperty("stack", out var st) ? st.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(stack))
+            {
+                logger.LogError("Client browser error: {Message}\n{Stack}", msg, stack);
+            }
+            else
+            {
+                logger.LogError("Client browser error: {Message}", msg);
+            }
+            return Results.Ok();
+        })
+        .WithName("ClientLog")
+        .WithSummary("Logs unhandled client-side errors into the application log file");
+
         // 4. GET /api/settings
         group.MapGet("/settings", (ISettingsService settingsService) =>
         {
             var s = settingsService.Current;
-            return Results.Ok(new
-            {
-                version = s.Version,
-                dbPath = s.DbPath,
-                thumbnailCachePath = s.ThumbnailCachePath,
-                thumbnailCacheMaxMb = s.ThumbnailCacheMaxMb,
-                thumbnailQuality = s.ThumbnailQuality,
-                thumbnailWorkers = s.ThumbnailWorkers,
-                logLevel = s.LogLevel.ToString(),
-                theme = s.Theme.ToString(),
-                gridCaption = s.GridCaption.ToString(),
-                checkerboardMode = s.CheckerboardMode.ToString(),
-                previewInfoOverlayDefault = s.PreviewInfoOverlayDefault,
-                defaultView = s.DefaultView,
-                rememberWindowState = s.RememberWindowState,
-                window = s.Window,
-                includePatterns = s.IncludePatterns,
-                excludeNames = s.ExcludeNames,
-                scanOnStartup = s.ScanOnStartup,
-                scanWorkers = s.ScanWorkers,
-                autoRemoveMissing = s.AutoRemoveMissing,
-                confirmBeforeDelete = s.ConfirmBeforeDelete,
-                api = new
-                {
-                    portPreference = s.Api.PortPreference,
-                    allowLan = s.Api.AllowLan,
-                    hasLanPassword = !string.IsNullOrWhiteSpace(s.Api.LanPasswordHash)
-                }
-            });
+            return Results.Ok(FormatSettingsResponse(s));
         })
         .WithName("GetSettings")
         .WithSummary("Gets all application settings (hides password hash)");
@@ -175,35 +168,7 @@ public static class SystemEndpoints
                 var s = settingsService.Current;
                 return Results.Ok(new
                 {
-                    settings = new
-                    {
-                        version = s.Version,
-                        dbPath = s.DbPath,
-                        thumbnailCachePath = s.ThumbnailCachePath,
-                        thumbnailCacheMaxMb = s.ThumbnailCacheMaxMb,
-                        thumbnailQuality = s.ThumbnailQuality,
-                        thumbnailWorkers = s.ThumbnailWorkers,
-                        logLevel = s.LogLevel.ToString(),
-                        theme = s.Theme.ToString(),
-                        gridCaption = s.GridCaption.ToString(),
-                        checkerboardMode = s.CheckerboardMode.ToString(),
-                        previewInfoOverlayDefault = s.PreviewInfoOverlayDefault,
-                        defaultView = s.DefaultView,
-                        rememberWindowState = s.RememberWindowState,
-                        window = s.Window,
-                        includePatterns = s.IncludePatterns,
-                        excludeNames = s.ExcludeNames,
-                        scanOnStartup = s.ScanOnStartup,
-                        scanWorkers = s.ScanWorkers,
-                        autoRemoveMissing = s.AutoRemoveMissing,
-                        confirmBeforeDelete = s.ConfirmBeforeDelete,
-                        api = new
-                        {
-                            portPreference = s.Api.PortPreference,
-                            allowLan = s.Api.AllowLan,
-                            hasLanPassword = !string.IsNullOrWhiteSpace(s.Api.LanPasswordHash)
-                        }
-                    },
+                    settings = FormatSettingsResponse(s),
                     restartRequired = restartRequired
                 });
             }
@@ -291,4 +256,55 @@ public static class SystemEndpoints
         .WithName("GetLicenses")
         .WithSummary("Retrieves third-party license notices");
     }
+
+    private static object FormatSettingsResponse(AppSettings s) => new
+    {
+        version = s.Version,
+        dbPath = s.DbPath,
+        thumbnailCachePath = s.ThumbnailCachePath,
+        thumbnailCacheMaxMb = s.ThumbnailCacheMaxMb,
+        thumbnailQuality = s.ThumbnailQuality,
+        thumbnailWorkers = s.ThumbnailWorkers,
+        logLevel = s.LogLevel.ToString(),
+        theme = s.Theme.ToString(),
+        gridCaption = s.GridCaption.ToString(),
+        checkerboardMode = s.CheckerboardMode.ToString(),
+        previewInfoOverlayDefault = s.PreviewInfoOverlayDefault,
+        defaultView = s.DefaultView,
+        rememberWindowState = s.RememberWindowState,
+        window = s.Window,
+        includePatterns = s.IncludePatterns,
+        excludeNames = s.ExcludeNames,
+        scanOnStartup = s.ScanOnStartup,
+        scanWorkers = s.ScanWorkers,
+        autoRemoveMissing = s.AutoRemoveMissing,
+        confirmBeforeDelete = s.ConfirmBeforeDelete,
+        appearance = new
+        {
+            theme = s.Theme.ToString(),
+            gridCaption = s.GridCaption.ToString(),
+            checkerboardMode = s.CheckerboardMode.ToString(),
+            previewInfoOverlayDefault = s.PreviewInfoOverlayDefault
+        },
+        behaviour = new
+        {
+            defaultView = s.DefaultView,
+            rememberWindowState = s.RememberWindowState,
+            confirmBeforeDelete = s.ConfirmBeforeDelete
+        },
+        scanning = new
+        {
+            includePatterns = s.IncludePatterns.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            excludeNames = s.ExcludeNames.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            scanOnStartup = s.ScanOnStartup,
+            scanWorkers = s.ScanWorkers,
+            autoRemoveMissing = s.AutoRemoveMissing
+        },
+        api = new
+        {
+            portPreference = s.Api.PortPreference,
+            allowLan = s.Api.AllowLan,
+            hasLanPassword = !string.IsNullOrWhiteSpace(s.Api.LanPasswordHash)
+        }
+    };
 }

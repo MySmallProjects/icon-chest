@@ -19,8 +19,14 @@ export function createTagChip(tag, options = {}) {
   const tagId = Number(tag.id || tag.tagId);
 
   const hex = normalizeHex(tag.color || tag.bgColor);
-  const bg = hex || 'var(--color-bg-secondary, #334155)';
-  const fg = hex ? getBestTextColor(hex) : 'inherit';
+  const hasCustomColor = Boolean(hex);
+  let bg = hex || 'var(--color-bg-secondary, #334155)';
+  let fg = hex ? getBestTextColor(hex) : 'inherit';
+
+  if (isSelected && !hasCustomColor) {
+    bg = 'var(--accent-primary, #0284c7)';
+    fg = '#ffffff';
+  }
 
   let stateClass = '';
   let badgeIcon = '';
@@ -36,9 +42,10 @@ export function createTagChip(tag, options = {}) {
     badgeIcon = '×';
   }
 
+  const customColorClass = hasCustomColor ? 'has-custom-color' : 'no-custom-color';
   const chip = el('button', {
     type: 'button',
-    className: `tag-chip ${isSelected ? 'selected' : ''} ${stateClass}`.trim(),
+    className: `tag-chip ${isSelected ? 'selected' : ''} ${customColorClass} ${stateClass}`.trim(),
     style: {
       backgroundColor: bg,
       color: fg
@@ -50,6 +57,8 @@ export function createTagChip(tag, options = {}) {
 
   if (badgeIcon) {
     chip.appendChild(el('span', { className: 'tag-chip-state-icon' }, badgeIcon));
+  } else if (isSelected) {
+    chip.appendChild(el('span', { className: 'tag-chip-state-icon tag-chip-selected-icon', 'aria-hidden': 'true' }, '✓'));
   }
 
   chip.appendChild(el('span', { className: 'tag-chip-name' }, tag.name));

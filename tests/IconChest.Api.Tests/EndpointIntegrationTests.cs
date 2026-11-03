@@ -102,8 +102,14 @@ public class EndpointIntegrationTests
         // GET /api/settings
         var getRes = await client.GetAsync("/api/settings");
         Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
+        var getJson = await getRes.Content.ReadAsStringAsync();
+        using var getDoc = JsonDocument.Parse(getJson);
+        Assert.True(getDoc.RootElement.TryGetProperty("appearance", out var getApp));
+        Assert.True(getApp.TryGetProperty("theme", out _));
+        Assert.True(getDoc.RootElement.TryGetProperty("behaviour", out var getBeh));
+        Assert.True(getBeh.TryGetProperty("defaultView", out _));
 
-        // PATCH /api/settings
+        // PATCH /api/settings with flat properties
         var patchPayload = new StringContent(
             JsonSerializer.Serialize(new { theme = "Dark", thumbnailWorkers = 3 }),
             Encoding.UTF8,
@@ -114,6 +120,36 @@ public class EndpointIntegrationTests
         var patchJson = await patchRes.Content.ReadAsStringAsync();
         using var patchDoc = JsonDocument.Parse(patchJson);
         Assert.Empty(patchDoc.RootElement.GetProperty("restartRequired").EnumerateArray());
+        var patchedSettings = patchDoc.RootElement.GetProperty("settings");
+        Assert.Equal("Dark", patchedSettings.GetProperty("theme").GetString());
+        Assert.Equal("Dark", patchedSettings.GetProperty("appearance").GetProperty("theme").GetString());
+
+        // PATCH /api/settings with nested appearance and behaviour objects
+        var nestedPayload = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                appearance = new { theme = "Light" },
+                behaviour = new { defaultView = "Tags" }
+            }),
+            Encoding.UTF8,
+            "application/json");
+        var nestedRes = await client.PatchAsync("/api/settings", nestedPayload);
+        Assert.Equal(HttpStatusCode.OK, nestedRes.StatusCode);
+
+        var nestedJson = await nestedRes.Content.ReadAsStringAsync();
+        using var nestedDoc = JsonDocument.Parse(nestedJson);
+        var nestedSettings = nestedDoc.RootElement.GetProperty("settings");
+        Assert.Equal("Light", nestedSettings.GetProperty("theme").GetString());
+        Assert.Equal("Light", nestedSettings.GetProperty("appearance").GetProperty("theme").GetString());
+        Assert.Equal("Tags", nestedSettings.GetProperty("defaultView").GetString());
+        Assert.Equal("Tags", nestedSettings.GetProperty("behaviour").GetProperty("defaultView").GetString());
+
+        // Verify GET returns updated values
+        var verifyRes = await client.GetAsync("/api/settings");
+        var verifyJson = await verifyRes.Content.ReadAsStringAsync();
+        using var verifyDoc = JsonDocument.Parse(verifyJson);
+        Assert.Equal("Light", verifyDoc.RootElement.GetProperty("theme").GetString());
+        Assert.Equal("Tags", verifyDoc.RootElement.GetProperty("defaultView").GetString());
     }
 
     [Fact]

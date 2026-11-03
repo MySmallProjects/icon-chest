@@ -24,19 +24,19 @@ export function renderBehaviourSection() {
   );
 
   viewSelect.addEventListener('change', () => {
-    saveSetting({ behaviour: { defaultView: viewSelect.value } });
+    saveSetting({ defaultView: viewSelect.value, behaviour: { defaultView: viewSelect.value } });
   });
 
   // 2. Remember window state
   const rememberWindowCheckbox = el('input', { type: 'checkbox', id: 'setting-remember-window' });
   rememberWindowCheckbox.addEventListener('change', () => {
-    saveSetting({ behaviour: { rememberWindowState: rememberWindowCheckbox.checked } });
+    saveSetting({ rememberWindowState: rememberWindowCheckbox.checked, behaviour: { rememberWindowState: rememberWindowCheckbox.checked } });
   });
 
   // 3. Confirm before delete
   const confirmDeleteCheckbox = el('input', { type: 'checkbox', id: 'setting-confirm-delete' });
   confirmDeleteCheckbox.addEventListener('change', () => {
-    saveSetting({ behaviour: { confirmBeforeDelete: confirmDeleteCheckbox.checked } });
+    saveSetting({ confirmBeforeDelete: confirmDeleteCheckbox.checked, behaviour: { confirmBeforeDelete: confirmDeleteCheckbox.checked } });
   });
 
   const card = el('div', { className: 'card' },
@@ -63,13 +63,14 @@ export function renderBehaviourSection() {
 
   // Load existing settings
   api.get('/api/settings').then(s => {
-    if (s.behaviour) {
-      if (s.behaviour.defaultView) {
-        viewSelect.value = s.behaviour.defaultView.toLowerCase();
-      }
-      rememberWindowCheckbox.checked = s.behaviour.rememberWindowState !== false;
-      confirmDeleteCheckbox.checked = s.behaviour.confirmBeforeDelete !== false;
-    }
+    const defaultView = (s.behaviour?.defaultView || s.defaultView || 'folders').toLowerCase();
+    viewSelect.value = defaultView;
+
+    const rememberWin = s.behaviour?.rememberWindowState ?? s.rememberWindowState;
+    rememberWindowCheckbox.checked = rememberWin !== false;
+
+    const confirmDel = s.behaviour?.confirmBeforeDelete ?? s.confirmBeforeDelete;
+    confirmDeleteCheckbox.checked = confirmDel !== false;
   }).catch(() => {});
 
   return container;

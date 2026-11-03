@@ -47,6 +47,10 @@ a:hover {
   border-radius: var(--radius-sm);
 }
 
+.hidden, [hidden] {
+  display: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

@@ -305,6 +305,7 @@ export class VirtualGrid {
       const item = this.imageSource?.getItem(idx);
       if (!item) return;
 
+      this.scrollEl.focus();
       this.focusedIndex = idx;
       if (this.selectionModel) {
         const orderedIds = await this.imageSource.getOrderedIds();
@@ -366,6 +367,9 @@ export class VirtualGrid {
 
     // Caption
     this._renderCaption(caption, item);
+
+    const fileName = item.fileName || item.filename || item.name || '';
+    img.alt = fileName || 'Image';
 
     // Thumbnail loading
     const pickedSize = pickThumbnailSize(this.cellSize, window.devicePixelRatio || 1);
@@ -436,16 +440,22 @@ export class VirtualGrid {
     captionEl.style.display = 'flex';
     clear(captionEl);
 
+    const fileName = item.fileName || item.filename || item.name || '';
+    const title = (item.title && item.title.trim()) || fileName;
+
     if (this.captionMode === 'filename') {
-      captionEl.appendChild(el('span', { className: 'caption-text truncate', title: item.name }, item.name));
+      captionEl.appendChild(el('span', { className: 'caption-text truncate', title: fileName }, fileName));
+    } else if (this.captionMode === 'title') {
+      captionEl.appendChild(el('span', { className: 'caption-text truncate', title: title }, title));
     } else if (this.captionMode === 'dimensions') {
       const dim = item.width && item.height ? `${item.width} × ${item.height}` : '-';
       captionEl.appendChild(el('span', { className: 'caption-text' }, dim));
     } else if (this.captionMode === 'filesize') {
-      captionEl.appendChild(el('span', { className: 'caption-text' }, this._formatBytes(item.file_size_bytes)));
+      const sizeBytes = item.sizeBytes ?? item.file_size_bytes;
+      captionEl.appendChild(el('span', { className: 'caption-text' }, this._formatBytes(sizeBytes)));
     } else if (this.captionMode === 'filename_and_dimensions') {
       const dim = item.width && item.height ? `${item.width} × ${item.height}` : '';
-      captionEl.appendChild(el('span', { className: 'caption-text truncate', title: item.name }, item.name));
+      captionEl.appendChild(el('span', { className: 'caption-text truncate', title: fileName }, fileName));
       if (dim) {
         captionEl.appendChild(el('span', { className: 'caption-subtext' }, dim));
       }
@@ -607,6 +617,7 @@ export class VirtualGrid {
 
     if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
+      e.stopPropagation();
       this.onToggleDetails();
       return;
     }

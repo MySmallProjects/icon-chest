@@ -154,11 +154,18 @@ public sealed class ImageSearchService : IImageSearchService
         var conditions = new List<string>();
         var p = new DynamicParameters();
 
-        // 1. Folder ID
+        // 1. Folder ID (Scope)
         if (request.FolderId.HasValue)
         {
             conditions.Add("folder_id = @folderId");
             p.Add("folderId", request.FolderId.Value);
+        }
+
+        // 1b. Filter Folder ID (Filter Bar)
+        if (request.FilterFolderId.HasValue)
+        {
+            conditions.Add("folder_id = @filterFolderId");
+            p.Add("filterFolderId", request.FilterFolderId.Value);
         }
 
         // 2. Directory & IncludeSubfolders
@@ -178,8 +185,11 @@ public sealed class ImageSearchService : IImageSearchService
             }
         }
 
-        // 3. Date field determination
+        // 3. Date field determination (for year/month)
         string dateCol = ResolveDateFieldColumn(request.DateField);
+
+        // Range field determination (for dateFrom/dateTo)
+        string rangeCol = ResolveDateFieldColumn(request.RangeField);
 
         // Year & Month filter on dateCol
         if (request.YearUnknown)
@@ -213,10 +223,10 @@ public sealed class ImageSearchService : IImageSearchService
             p.Add("month", request.Month.Value.ToString("D2"));
         }
 
-        // Date ranges
+        // Date ranges (applies to rangeCol)
         if (!string.IsNullOrWhiteSpace(request.DateFrom))
         {
-            conditions.Add($"{dateCol} >= @dateFrom");
+            conditions.Add($"{rangeCol} >= @dateFrom");
             p.Add("dateFrom", request.DateFrom.Trim());
         }
 
@@ -225,73 +235,88 @@ public sealed class ImageSearchService : IImageSearchService
             var dateToTrim = request.DateTo.Trim();
             // If date is yyyy-mm-dd, append end of day to cover entire day
             var dateToVal = dateToTrim.Length == 10 ? dateToTrim + "T23:59:59.999Z" : dateToTrim;
-            conditions.Add($"{dateCol} <= @dateTo");
+            conditions.Add($"{rangeCol} <= @dateTo");
             p.Add("dateTo", dateToVal);
         }
 
-        // 4. Tags
-        if (request.Tags != null && request.Tags.Count > 0)
+        // 4. Untagged
+        if (request.Untagged == true)
         {
-            var rawTags = request.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToList();
-            if (rawTags.Count > 0)
+            conditions.Add("id NOT IN (SELECT image_id FROM image_tag)");
+        }
+
+        // 4b. Tags helper
+        void ApplyTags(List<string> rawTagsList, TagFilterMode mode, string paramPrefix)
+        {
+            var rawTags = rawTagsList.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToList();
+            if (rawTags.Count == 0) return;
+
+            var tagIds = new List<long>();
+            var tagNames = new List<string>();
+
+            foreach (var t in rawTags)
             {
-                var tagIds = new List<long>();
-                var tagNames = new List<string>();
-
-                foreach (var t in rawTags)
+                if (long.TryParse(t, out var parsedId))
                 {
-                    if (long.TryParse(t, out var parsedId))
-                    {
-                        tagIds.Add(parsedId);
-                    }
-                    else
-                    {
-                        tagNames.Add(t);
-                    }
-                }
-
-                // Resolve all tag IDs from DB
-                var resolvedIds = new HashSet<long>(tagIds);
-                if (tagNames.Count > 0)
-                {
-                    var foundIds = conn.Query<long>(
-                        "SELECT id FROM tag WHERE name IN @tagNames COLLATE NOCASE;",
-                        new { tagNames });
-                    foreach (var fid in foundIds)
-                    {
-                        resolvedIds.Add(fid);
-                    }
-                }
-
-                if (resolvedIds.Count == 0)
-                {
-                    // No matching tags exist -> impossible match
-                    conditions.Add("1 = 0");
-                }
-                else if (request.TagMode == TagFilterMode.All)
-                {
-                    conditions.Add($@"
-                        id IN (
-                            SELECT image_id
-                            FROM image_tag
-                            WHERE tag_id IN @resolvedTagIds
-                            GROUP BY image_id
-                            HAVING COUNT(DISTINCT tag_id) = {resolvedIds.Count}
-                        )");
-                    p.Add("resolvedTagIds", resolvedIds.ToList());
+                    tagIds.Add(parsedId);
                 }
                 else
                 {
-                    // Any
-                    conditions.Add(@"
-                        id IN (
-                            SELECT image_id
-                            FROM image_tag
-                            WHERE tag_id IN @resolvedTagIds
-                        )");
-                    p.Add("resolvedTagIds", resolvedIds.ToList());
+                    tagNames.Add(t);
                 }
             }
+
+            // Resolve all tag IDs from DB
+            var resolvedIds = new HashSet<long>(tagIds);
+            if (tagNames.Count > 0)
+            {
+                var foundIds = conn.Query<long>(
+                    "SELECT id FROM tag WHERE name IN @names COLLATE NOCASE;",
+                    new { names = tagNames });
+                foreach (var fid in foundIds)
+                {
+                    resolvedIds.Add(fid);
+                }
+            }
+
+            if (resolvedIds.Count == 0)
+            {
+                // No matching tags exist -> impossible match
+                conditions.Add("1 = 0");
+            }
+            else if (mode == TagFilterMode.All)
+            {
+                conditions.Add($@"
+                    id IN (
+                        SELECT image_id
+                        FROM image_tag
+                        WHERE tag_id IN @{paramPrefix}ResolvedTagIds
+                        GROUP BY image_id
+                        HAVING COUNT(DISTINCT tag_id) = {resolvedIds.Count}
+                    )");
+                p.Add($"{paramPrefix}ResolvedTagIds", resolvedIds.ToList());
+            }
+            else
+            {
+                // Any
+                conditions.Add($@"
+                    id IN (
+                        SELECT image_id
+                        FROM image_tag
+                        WHERE tag_id IN @{paramPrefix}ResolvedTagIds
+                    )");
+                p.Add($"{paramPrefix}ResolvedTagIds", resolvedIds.ToList());
+            }
+        }
+
+        if (request.Tags != null && request.Tags.Count > 0)
+        {
+            ApplyTags(request.Tags, request.TagMode, "scope");
+        }
+
+        if (request.FilterTags != null && request.FilterTags.Count > 0)
+        {
+            ApplyTags(request.FilterTags, request.FilterTagMode, "filter");
         }
 
         // 5. Types (format/extension)
@@ -349,17 +374,35 @@ public sealed class ImageSearchService : IImageSearchService
             conditions.Add("rating >= @ratingMin");
             p.Add("ratingMin", request.RatingMin.Value);
         }
+        if (request.RatingMax.HasValue)
+        {
+            if (request.RatingMax.Value == 0)
+            {
+                conditions.Add("(rating = 0 OR rating IS NULL)");
+            }
+            else
+            {
+                conditions.Add("rating <= @ratingMax");
+                p.Add("ratingMax", request.RatingMax.Value);
+            }
+        }
         if (request.Favourite.HasValue)
         {
             conditions.Add("is_favourite = @favourite");
             p.Add("favourite", request.Favourite.Value ? 1 : 0);
         }
 
-        // 9. Text search
+        // 9. Text search (words ANDed, consistent with query language bare terms)
         if (!string.IsNullOrWhiteSpace(request.Text))
         {
-            conditions.Add("(file_name LIKE @textPattern OR title LIKE @textPattern OR description LIKE @textPattern)");
-            p.Add("textPattern", $"%{request.Text.Trim()}%");
+            var terms = request.Text.Trim()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (int i = 0; i < terms.Length; i++)
+            {
+                var pName = $"textPattern_{i}";
+                conditions.Add($"(file_name LIKE @{pName} OR title LIKE @{pName} OR description LIKE @{pName})");
+                p.Add(pName, $"%{terms[i]}%");
+            }
         }
 
         // 10. Inclusion flags (Hidden, Missing, Duplicate)

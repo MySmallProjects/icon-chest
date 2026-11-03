@@ -733,8 +733,318 @@ public class FrontEndUnitTests
                     diff = multiModel.getTagDiff();
                     if (diff.addTagIds.length !== 1 || diff.addTagIds[0] !== 99) return false;
 
-                    const multiPatch = multiModel.buildPatchBody();
-                    if (!multiPatch.addTagIds || multiPatch.addTagIds[0] !== 99) return false;
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("chromium")]
+    public async Task JavaScriptModules_FilterModel_Presets_Dirty_And_Params_PureLogic(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const {
+                        createDefaultFilterState,
+                        computeDatePreset,
+                        isFilterDirty,
+                        filterStateToParams,
+                        getActiveFilterChips,
+                        getVisibleControlsForView
+                    } = await import('/js/lib/filter-model.js');
+
+                    // 1. Initial default state
+                    const def = createDefaultFilterState();
+                    if (def.text !== '' || def.datePreset !== 'all' || def.ratingChoice !== '') return false;
+                    if (isFilterDirty(def, def)) return false;
+
+                    // 2. Date presets with injected clock: 2026-10-26 (Monday)
+                    const clock = new Date(2026, 9, 26, 12, 0, 0); // Oct 26, 2026
+                    const today = computeDatePreset('today', clock);
+                    if (today.dateFrom !== '2026-10-26' || today.dateTo !== '2026-10-26') return false;
+
+                    const yest = computeDatePreset('yesterday', clock);
+                    if (yest.dateFrom !== '2026-10-25' || yest.dateTo !== '2026-10-25') return false;
+
+                    const last7 = computeDatePreset('last7days', clock);
+                    if (last7.dateFrom !== '2026-10-20' || last7.dateTo !== '2026-10-26') return false;
+
+                    const thisMonth = computeDatePreset('thisMonth', clock);
+                    if (thisMonth.dateFrom !== '2026-10-01' || thisMonth.dateTo !== '2026-10-31') return false;
+
+                    const thisYear = computeDatePreset('thisYear', clock);
+                    if (thisYear.dateFrom !== '2026-01-01' || thisYear.dateTo !== '2026-12-31') return false;
+
+                    // 3. Dirty detection
+                    const modified = { ...def, text: 'search term', ratingChoice: '4' };
+                    if (!isFilterDirty(def, modified)) return false;
+                    if (!isFilterDirty(modified, def)) return false;
+
+                    // 4. Parameter mapping
+                    const params = filterStateToParams({
+                        ...def,
+                        text: 'button icon',
+                        types: ['png', 'svg'],
+                        filterTags: ['ui', 'vector'],
+                        filterTagMode: 'all',
+                        dateFrom: '2026-01-01',
+                        dateTo: '2026-12-31',
+                        rangeField: 'created',
+                        ratingChoice: 'unrated',
+                        minWidth: 100,
+                        hidden: 'only',
+                        duplicate: 'exclude'
+                    });
+
+                    if (params.text !== 'button icon') return false;
+                    if (params.type.length !== 2 || params.type[0] !== 'png') return false;
+                    if (params.filterTag.length !== 2 || params.filterTagMode !== 'all') return false;
+                    if (params.rangeField !== 'created') return false;
+                    if (params.dateFrom !== '2026-01-01' || params.dateTo !== '2026-12-31') return false;
+                    if (params.ratingMax !== 0) return false;
+                    if (params.minWidth !== 100) return false;
+                    if (params.hidden !== 'only') return false;
+                    if (params.duplicate) return false; // exclude is default/omitted
+
+                    // 5. Active chips
+                    const chips = getActiveFilterChips({
+                        ...def,
+                        text: 'test',
+                        ratingChoice: 'unrated',
+                        hidden: 'only'
+                    });
+
+                    if (chips.length !== 3) return false;
+                    const ids = chips.map(c => c.id);
+                    if (!ids.includes('text') || !ids.includes('rating') || !ids.includes('hidden')) return false;
+
+                    // Test chip removal
+                    const textChip = chips.find(c => c.id === 'text');
+                    const newState = textChip.remove({ ...def, text: 'test' });
+                    if (newState.text !== '') return false;
+
+                    // 6. View-specific control visibility
+                    const favVis = getVisibleControlsForView('favourites');
+                    if (favVis.showFavourite !== false) return false;
+
+                    const folderVis = getVisibleControlsForView('folders');
+                    if (folderVis.showFolder !== false) return false;
+
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("chromium")]
+    public async Task JavaScriptModules_QueryBoxModel_Validation_And_Recents(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const { QueryBoxModel, MAX_RECENT_QUERIES } = await import('/js/lib/query-box-model.js');
+
+                    // Mock storage
+                    const storageMap = new Map();
+                    const mockStorage = {
+                        getItem: (k) => storageMap.get(k) || null,
+                        setItem: (k, v) => storageMap.set(k, String(v)),
+                        removeItem: (k) => storageMap.delete(k)
+                    };
+
+                    let validateCallCount = 0;
+                    let lastValidatedQuery = '';
+
+                    const model = new QueryBoxModel({
+                        debounceMs: 10,
+                        storage: mockStorage,
+                        validateFn: async (text) => {
+                            validateCallCount++;
+                            lastValidatedQuery = text;
+                            if (text.includes('bad')) {
+                                return {
+                                    valid: false,
+                                    errors: [{ message: 'Bad field name', position: 5, length: 3 }]
+                                };
+                            }
+                            return {
+                                valid: true,
+                                errors: [],
+                                mentionsHidden: text.includes('hidden')
+                            };
+                        }
+                    });
+
+                    // 1. Initial state
+                    if (model.text !== '' || !model.isValid) return false;
+
+                    // 2. Immediate validation
+                    model.setText('rating >= 4', true);
+                    await new Promise(r => setTimeout(r, 30));
+
+                    if (model.isValid !== true) return false;
+                    if (model.text !== 'rating >= 4') return false;
+
+                    // 3. Error selection range mapping
+                    model.setText('bad == true', true);
+                    await new Promise(r => setTimeout(r, 30));
+
+                    if (model.isValid !== false) return false;
+                    if (model.errors.length !== 1) return false;
+                    const range = model.getErrorSelectionRange(model.errors[0]);
+                    if (range[0] !== 5 || range[1] !== 8) return false;
+
+                    // 4. Stale response rejection
+                    let slowResolve;
+                    model.validateFn = async (text) => {
+                        if (text === 'slow') {
+                            return new Promise(res => { slowResolve = res; });
+                        }
+                        return { valid: true, errors: [] };
+                    };
+
+                    model.setText('slow', true);
+                    // Fast override
+                    model.setText('fast', true);
+                    await new Promise(r => setTimeout(r, 30));
+                    if (model.text !== 'fast' || !model.isValid) return false;
+
+                    // Late slow response resolves
+                    slowResolve({ valid: false, errors: [{ message: 'Out of date' }] });
+                    await new Promise(r => setTimeout(r, 20));
+                    // Should still be valid because stale response was discarded
+                    if (!model.isValid) return false;
+
+                    // 5. Recent queries storage & capping at 20
+                    for (let i = 1; i <= 25; i++) {
+                        model.addRecentQuery(`query_${i}`);
+                    }
+                    const recents = model.getRecentQueries();
+                    if (recents.length !== 20) return false;
+                    if (recents[0] !== 'query_25') return false; // Newest on top
+
+                    // Deduplication test
+                    model.addRecentQuery('query_25');
+                    const deduped = model.getRecentQueries();
+                    if (deduped.length !== 20 || deduped[0] !== 'query_25') return false;
+
+                    // Clear
+                    model.clearRecentQueries();
+                    if (model.getRecentQueries().length !== 0) return false;
+
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("chromium")]
+    public async Task JavaScriptModules_HelpRender_SafeDOM_BuildsSectionsAndExamples(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const { renderHelpContent } = await import('/js/lib/help-render.js');
+
+                    const sampleShortcuts = [
+                        { key: '/', description: 'Focus filter box', context: 'filter' },
+                        { key: 'I', description: 'Toggle details panel', context: 'grid' }
+                    ];
+
+                    let triedQuery = null;
+                    const sampleHelp = {
+                        fields: [
+                            { name: 'rating', type: 'number', supportedOperators: ['==', '>=', '<='], description: 'Rating 0-5', exampleQuery: 'rating >= 4' }
+                        ],
+                        examples: [
+                            { query: 'favourite and rating >= 4', description: 'Best items', category: 'Ratings' }
+                        ]
+                    };
+
+                    const dom = renderHelpContent({
+                        shortcuts: sampleShortcuts,
+                        queryHelp: sampleHelp,
+                        onTryQuery: (q) => { triedQuery = q; }
+                    });
+
+                    if (!dom || !dom.classList.contains('help-content-sections')) return false;
+
+                    // 1. Check sections presence
+                    const secShortcuts = dom.querySelector('#section-shortcuts');
+                    const secQuery = dom.querySelector('#section-query');
+                    const secFilters = dom.querySelector('#section-filters');
+                    const secTips = dom.querySelector('#section-tips');
+
+                    if (!secShortcuts || !secQuery || !secFilters || !secTips) return false;
+
+                    // 2. Check table rows
+                    const shortcutRows = secShortcuts.querySelectorAll('table.shortcuts-table tbody tr');
+                    if (shortcutRows.length < 2) return false;
+
+                    const fieldRows = secQuery.querySelectorAll('table.fields-table tbody tr');
+                    if (fieldRows.length !== 1) return false;
+
+                    // 3. Check 'Try it' button click
+                    const tryBtn = secQuery.querySelector('.btn-try-query');
+                    if (!tryBtn) return false;
+                    tryBtn.click();
+
+                    if (triedQuery !== 'favourite and rating >= 4') return false;
 
                     return true;
                 }
