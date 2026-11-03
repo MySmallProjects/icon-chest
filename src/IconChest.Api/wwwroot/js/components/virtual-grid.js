@@ -289,7 +289,9 @@ export class VirtualGrid {
       const idx = parseInt(cell.dataset.index, 10);
       const item = this.imageSource?.getItem(idx);
       if (item) {
-        const nextFav = !item.is_favourite;
+        const curFav = Boolean(item.isFavourite ?? item.is_favourite);
+        const nextFav = !curFav;
+        item.isFavourite = nextFav;
         item.is_favourite = nextFav;
         heart.setAttribute('aria-pressed', String(nextFav));
         heart.classList.toggle('active', nextFav);
@@ -355,12 +357,12 @@ export class VirtualGrid {
     cell.classList.toggle('is-focus', this.focusedIndex === index);
 
     // Favourite state
-    const isFav = Boolean(item.is_favourite);
+    const isFav = Boolean(item.isFavourite ?? item.is_favourite);
     heart.setAttribute('aria-pressed', String(isFav));
     heart.classList.toggle('active', isFav);
 
     // Hidden badge
-    badgeHidden.style.display = item.is_hidden ? 'inline-block' : 'none';
+    badgeHidden.style.display = (item.isHidden ?? item.is_hidden) ? 'inline-block' : 'none';
 
     // Caption
     this._renderCaption(caption, item);

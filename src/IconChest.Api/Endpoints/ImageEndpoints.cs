@@ -1,6 +1,9 @@
 using System.Net.Mime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Dapper;
+using IconChest.Core.Common;
+using IconChest.Core.Data;
 using IconChest.Core.Data.Repositories;
 using IconChest.Core.Images;
 using IconChest.Core.Tags;
@@ -10,6 +13,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
 namespace IconChest.Api.Endpoints;
+
+public sealed class ImageSummaryRequest
+{
+    [JsonPropertyName("ids")]
+    public List<long> Ids { get; set; } = new();
+}
 
 public sealed class BulkEditPayload
 {
@@ -281,6 +290,35 @@ public static class ImageEndpoints
         .WithName("GetImageIds")
         .WithSummary("Returns only matching image IDs for select-all / shift-range operations (capped at 200,000)");
 
+        // 2b. POST /api/images/summary
+        group.MapPost("/summary", (
+            HttpContext context,
+            ImageSummaryRequest request,
+            IImageSummaryService summaryService) =>
+        {
+            if (request.Ids == null || request.Ids.Count == 0)
+            {
+                return EndpointHelpers.ValidationError(context, "ids", "At least one image ID must be provided.");
+            }
+
+            if (request.Ids.Count > 10_000)
+            {
+                return EndpointHelpers.ValidationError(context, "ids", "Cannot summarize more than 10,000 images.");
+            }
+
+            try
+            {
+                var summary = summaryService.GetSummary(request.Ids);
+                return Results.Ok(summary);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return EndpointHelpers.NotFound(context, ex.Message);
+            }
+        })
+        .WithName("GetImagesSummary")
+        .WithSummary("Returns aggregated metadata and shared edit state for specified images (up to 10,000)");
+
         // 3. GET /api/images/{id}
         group.MapGet("/{id:long}", (
             HttpContext context,
@@ -325,7 +363,9 @@ public static class ImageEndpoints
                 modifiedUtc = img.ModifiedUtc,
                 exifDateUtc = img.ExifDateUtc,
                 takenOverrideUtc = img.TakenOverrideUtc,
+                takenOverrideDate = DateHelper.UtcToLocalDateString(img.TakenOverrideUtc),
                 effectiveDateUtc = img.EffectiveDateUtc,
+                effectiveDateSource = DateHelper.DetermineEffectiveDateSource(img.TakenOverrideUtc, img.ExifDateUtc, img.CreatedUtc, img.ModifiedUtc),
                 addedUtc = img.AddedUtc,
                 title = img.Title,
                 description = img.Description,
@@ -344,31 +384,85 @@ public static class ImageEndpoints
         .WithName("GetImageById")
         .WithSummary("Gets full metadata and details for a single image");
 
-        // 4. PATCH /api/images (Bulk edit)
-        group.MapPatch("/", (
+        // 3b. GET /api/images/{id}/duplicates
+        group.MapGet("/{id:long}/duplicates", (
             HttpContext context,
-            BulkEditPayload payload,
+            long id,
+            IImageRepository imageRepository,
+            IDatabaseConnectionFactory connectionFactory) =>
+        {
+            var img = imageRepository.GetById(id);
+            if (img == null)
+            {
+                return EndpointHelpers.NotFound(context, $"Image with ID {id} was not found.");
+            }
+
+            using var conn = connectionFactory.CreateAndOpenConnection();
+            const string sql = @"
+                SELECT i.id AS id, i.path AS path, f.path AS folder, i.size_bytes AS size
+                FROM image i
+                JOIN library_folder f ON i.folder_id = f.id
+                WHERE i.hash = @hash
+                  AND i.size_bytes = @size
+                  AND i.id != @id
+                  AND i.is_hidden = 0
+                  AND i.is_missing = 0
+                ORDER BY i.path ASC;";
+
+            var duplicates = conn.Query(sql, new { hash = img.Hash, size = img.SizeBytes, id = img.Id }).ToList();
+            return Results.Ok(duplicates);
+        })
+        .WithName("GetImageDuplicates")
+        .WithSummary("Gets other images in the same duplicate set, excluding self, hidden, and missing");
+
+        // 4. PATCH /api/images (Bulk edit)
+        group.MapPatch("/", async (
+            HttpContext context,
             IImageEditService editService) =>
         {
-            if (payload.Ids == null || payload.Ids.Count == 0)
+            using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("ids", out var idsProp) || idsProp.ValueKind != JsonValueKind.Array)
             {
                 return EndpointHelpers.ValidationError(context, "ids", "At least one image ID must be provided.");
             }
 
-            if (payload.Ids.Count > 10_000)
+            var ids = new List<long>();
+            foreach (var item in idsProp.EnumerateArray())
+            {
+                if (item.TryGetInt64(out var id))
+                {
+                    ids.Add(id);
+                }
+            }
+
+            if (ids.Count == 0)
+            {
+                return EndpointHelpers.ValidationError(context, "ids", "At least one image ID must be provided.");
+            }
+
+            if (ids.Count > 10_000)
             {
                 return EndpointHelpers.ValidationError(context, "ids", "Cannot edit more than 10,000 images in a single request.");
             }
 
-            var changes = ParseChanges(payload.Changes);
+            ImageEditChanges changes;
+            try
+            {
+                changes = ParseChanges(root);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointHelpers.ValidationError(context, "takenOverrideDate", ex.Message);
+            }
 
             try
             {
-                editService.EditImages(payload.Ids, changes);
+                editService.EditImages(ids, changes);
                 return Results.Ok(new
                 {
                     status = "updated",
-                    count = payload.Ids.Count
+                    count = ids.Count
                 });
             }
             catch (KeyNotFoundException ex)
@@ -538,10 +632,15 @@ public static class ImageEndpoints
         return val.Equals("all", StringComparison.OrdinalIgnoreCase) ? TagFilterMode.All : TagFilterMode.Any;
     }
 
-    private static ImageEditChanges ParseChanges(JsonElement element)
+    private static ImageEditChanges ParseChanges(JsonElement root)
     {
         var changes = new ImageEditChanges();
-        if (element.ValueKind != JsonValueKind.Object) return changes;
+        if (root.ValueKind != JsonValueKind.Object) return changes;
+
+        // Support both nested "changes" object and direct properties on root
+        var element = (root.TryGetProperty("changes", out var changesProp) && changesProp.ValueKind == JsonValueKind.Object)
+            ? changesProp
+            : root;
 
         if (element.TryGetProperty("title", out var titleProp))
         {
@@ -561,22 +660,42 @@ public static class ImageEndpoints
             changes.Rating = ratingProp.ValueKind == JsonValueKind.Null ? null : ratingProp.GetInt32();
         }
 
-        if (element.TryGetProperty("isFavourite", out var favProp))
+        if (element.TryGetProperty("isFavourite", out var favProp) || element.TryGetProperty("favourite", out favProp))
         {
             changes.HasIsFavourite = true;
             changes.IsFavourite = favProp.ValueKind == JsonValueKind.Null ? null : favProp.GetBoolean();
         }
 
-        if (element.TryGetProperty("isHidden", out var hiddenProp))
+        if (element.TryGetProperty("isHidden", out var hiddenProp) || element.TryGetProperty("hidden", out hiddenProp))
         {
             changes.HasIsHidden = true;
             changes.IsHidden = hiddenProp.ValueKind == JsonValueKind.Null ? null : hiddenProp.GetBoolean();
         }
 
-        if (element.TryGetProperty("takenOverrideUtc", out var takenProp))
+        bool hasDate = element.TryGetProperty("takenOverrideDate", out var takenDateProp);
+        bool hasUtc = element.TryGetProperty("takenOverrideUtc", out var takenUtcProp);
+        if (hasDate && hasUtc)
+        {
+            throw new ArgumentException("Cannot specify both takenOverrideDate and takenOverrideUtc.");
+        }
+
+        if (hasDate)
         {
             changes.HasTakenOverrideUtc = true;
-            changes.TakenOverrideUtc = takenProp.ValueKind == JsonValueKind.Null ? null : takenProp.GetString();
+            if (takenDateProp.ValueKind == JsonValueKind.Null)
+            {
+                changes.TakenOverrideUtc = null;
+            }
+            else
+            {
+                string dateStr = takenDateProp.GetString()!;
+                changes.TakenOverrideUtc = DateHelper.DateToLocalNoonUtc(dateStr);
+            }
+        }
+        else if (hasUtc)
+        {
+            changes.HasTakenOverrideUtc = true;
+            changes.TakenOverrideUtc = takenUtcProp.ValueKind == JsonValueKind.Null ? null : takenUtcProp.GetString();
         }
 
         if (element.TryGetProperty("addTagIds", out var addTagsProp) && addTagsProp.ValueKind == JsonValueKind.Array)

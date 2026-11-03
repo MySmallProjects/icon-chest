@@ -3,8 +3,15 @@
  * Never constructs HTML from string concatenation of server data.
  */
 
+const SVG_TAGS = new Set([
+  'svg', 'path', 'g', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'text', 'tspan', 'use', 'defs'
+]);
+
 export function el(tag, props = {}, ...children) {
-  const elem = document.createElement(tag);
+  const isSvg = SVG_TAGS.has(tag.toLowerCase());
+  const elem = isSvg
+    ? document.createElementNS('http://www.w3.org/2000/svg', tag)
+    : document.createElement(tag);
 
   for (const [key, value] of Object.entries(props)) {
     if (value == null || value === false) {
@@ -15,7 +22,13 @@ export function el(tag, props = {}, ...children) {
       const eventName = key.slice(2).toLowerCase();
       elem.addEventListener(eventName, value);
     } else if (key === 'className' || key === 'class') {
-      elem.className = value;
+      if (isSvg) {
+        elem.setAttribute('class', value);
+      } else {
+        elem.className = value;
+      }
+    } else if (key === 'value') {
+      elem.value = value;
     } else if (key === 'dataset' && typeof value === 'object') {
       for (const [dataKey, dataVal] of Object.entries(value)) {
         elem.dataset[dataKey] = dataVal;

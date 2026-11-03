@@ -104,3 +104,26 @@ All algorithms that do not require DOM access are isolated into testable, data-a
 * `preview.js`: Full-viewport modal overlay (`role="dialog"`, `aria-modal="true"`) setting `inert` on the application root. Supports navigation arrows, preload of adjacent images, and an info HUD toggled via the `I` key.
 * `details-panel.js`: Collapsible 260–480px side drawer displaying image dimensions, file size, hash, EXIF metadata, tag chips, and read-only star ratings.
 
+---
+
+## 6. Details and Editing Architecture (Phase 8)
+
+### 6.1 Native Form Input Compatibility in WebKitGTK 2.36+
+* **`<input type="color">`**: In WebKitGTK 2.36+ without the `xdg-desktop-portal` or GTK color chooser integration, native color dialogs fail or behave unpredictably across distributions.
+  * **Architectural Decision:** An accessible custom color chooser dialog is used: 16 curated swatches meeting WCAG 2.1 $\ge 4.5:1$ contrast against their text, a validated hex code input with live non-blocking contrast ratio warnings against both light (`#ffffff`) and dark (`#1f2937`) backgrounds, and an immediate preview badge.
+* **`<input type="date">`**: In WebKitGTK 2.36–2.40 on Linux, `<input type="date">` renders as an unstyled text field without a drop-down calendar widget.
+  * **Architectural Decision:** An accessible text input with strict `YYYY-MM-DD` validation and quick-fill buttons ("Use EXIF date", "Use created date", "Clear") provides identical, rock-solid cross-platform ergonomics across all target engines.
+
+### 6.2 Pure Front-End Modules
+* `lib/contrast.js`: WCAG 2.1 relative luminance calculation, contrast ratio evaluation ($L_1+0.05 / L_2+0.05$), hex normalization/parsing, and 16 accessible color pairs ($\ge 4.5:1$).
+* `lib/tag-combobox-model.js`: Prefix-first and substring ranking with Unicode-aware case folding, inline tag creation evaluation (valid 1–50 character trimmed string, no control characters, exact-match selection vs new tag creation).
+* `lib/tags-store.js`: Centralized in-memory tag store with subscriber pattern, SSE `library.changed` auto-refresh, and optimistic mutations with rollback.
+* `lib/edit-model.js`: Multi-image edit state aggregator, dirty field tracking, `PATCH /api/images` payload generation (emitting only dirty fields, empty string for title reset, explicit `null` for cleared description/date, tri-state tag diffing into `addTagIds` and `removeTagIds`), calendar date and range validation.
+
+### 6.3 UI Components & Interactions
+* `components/context-menu.js`: WAI-ARIA `role="menu"` and `role="menuitem"` popup supporting pointer right-click, `Shift+F10`, `Menu` key, type-ahead, arrow navigation, Escape dismissal, and focus return.
+* `components/tag-chip.js`: Accessible tag badges with tri-state cycle (`1` all ✓, `0.5` some +, `0` removed ×), context menu (Rename `F2`, Recolour, Delete `Delete`).
+* `lib/dialog.js`: Three-button unsaved changes guard (Save, Discard, Cancel; Cancel strictly preserves focus and selection state), Rename dialog, Recolour dialog with swatches and live contrast warning, Delete confirmation dialog respecting `confirmBeforeDelete`.
+* `components/details-panel.js`: Full editable details drawer with sticky header dirty indicator, single and bulk multi-edit (up to 10,000 images), rating star picker, local native file launcher (`POST /api/native/open-file`), duplicates list (`GET /api/images/{id}/duplicates`), and `Ctrl+S` / `Cmd+S` keyboard save shortcut.
+
+

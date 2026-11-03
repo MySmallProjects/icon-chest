@@ -1,6 +1,10 @@
-import { el, clear } from '../lib/dom.js';
+import { el, clear, createSvg } from '../lib/dom.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
+
+const CLOSE_ICON = '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+const PREV_ICON = '<svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>';
+const NEXT_ICON = '<svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>';
 
 /**
  * Full-window modal preview overlay.
@@ -64,11 +68,7 @@ export class PreviewOverlay {
       className: 'preview-btn preview-close-btn',
       'aria-label': 'Close preview (Escape)',
       title: 'Close (Esc)'
-    }, [
-      el('svg', { viewBox: '0 0 24 24', width: '24', height: '24' }, [
-        el('path', { d: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z' })
-      ])
-    ]);
+    }, [createSvg(CLOSE_ICON)]);
 
     // Prev / Next buttons
     this.prevBtn = el('button', {
@@ -76,22 +76,14 @@ export class PreviewOverlay {
       className: 'preview-nav-btn preview-prev-btn',
       'aria-label': 'Previous image (Left arrow)',
       title: 'Previous (Left arrow)'
-    }, [
-      el('svg', { viewBox: '0 0 24 24', width: '32', height: '32' }, [
-        el('path', { d: 'M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z' })
-      ])
-    ]);
+    }, [createSvg(PREV_ICON)]);
 
     this.nextBtn = el('button', {
       type: 'button',
       className: 'preview-nav-btn preview-next-btn',
       'aria-label': 'Next image (Right arrow)',
       title: 'Next (Right arrow)'
-    }, [
-      el('svg', { viewBox: '0 0 24 24', width: '32', height: '32' }, [
-        el('path', { d: 'M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z' })
-      ])
-    ]);
+    }, [createSvg(NEXT_ICON)]);
 
     // Info overlay
     this.infoOverlayEl = el('div', {
@@ -299,17 +291,18 @@ export class PreviewOverlay {
       if (this.items[this.currentIndex] !== id) return;
 
       const title = details.title || details.fileName || 'Untitled';
-      const sizeKb = (details.fileSizeBytes / 1024).toFixed(1) + ' KB';
+      const sizeBytes = details.sizeBytes ?? details.fileSizeBytes ?? details.size_bytes ?? 0;
+      const sizeKb = sizeBytes > 0 ? (sizeBytes / 1024).toFixed(1) + ' KB' : '—';
       const dim = (details.width && details.height) ? `${details.width} × ${details.height}` : 'Vector / Unknown';
       const fmt = (details.format || '').toUpperCase();
       const effDate = details.effectiveDateUtc ? details.effectiveDateUtc.substring(0, 10) : '—';
 
       this.infoOverlayEl.appendChild(el('div', { className: 'preview-info-title' }, title));
       this.infoOverlayEl.appendChild(el('div', { className: 'preview-info-details' }, [
-        el('span', {}, details.fileName),
-        el('span', {}, dim),
-        el('span', {}, `${sizeKb} (${fmt})`),
-        el('span', {}, effDate),
+        el('span', { className: 'preview-info-filename' }, details.fileName),
+        el('span', { className: 'preview-info-dim' }, dim),
+        el('span', { className: 'preview-info-size' }, `${sizeKb} (${fmt})`),
+        el('span', { className: 'preview-info-date' }, effDate),
         el('span', { className: 'preview-info-pos' }, posText)
       ]));
     } catch {

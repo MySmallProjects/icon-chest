@@ -11,6 +11,7 @@ using IconChest.Core.Images;
 using IconChest.Core.Logging;
 using IconChest.Core.Missing;
 using IconChest.Core.Duplicates;
+using IconChest.Core.Native;
 using IconChest.Core.Scanning;
 using IconChest.Core.Settings;
 using IconChest.Core.Tags;
@@ -172,6 +173,8 @@ builder.Services.AddSingleton<IImageEditService, ImageEditService>();
 builder.Services.AddSingleton<ITreeService, TreeService>();
 builder.Services.AddSingleton<IDuplicateService, DuplicateService>();
 builder.Services.AddSingleton<IMissingService, MissingService>();
+builder.Services.AddSingleton<IImageSummaryService, ImageSummaryService>();
+builder.Services.AddSingleton<INativeLauncher, ProcessNativeLauncher>();
 
 // Security Services
 builder.Services.AddSingleton<ISessionManager, SessionManager>();
@@ -284,6 +287,7 @@ app.MapDuplicateEndpoints();
 app.MapMissingEndpoints();
 app.MapThumbnailEndpoints();
 app.MapEventEndpoints();
+app.MapNativeEndpoints();
 
 // SPA fallback for non-/api paths
 app.MapFallbackToFile("index.html", new StaticFileOptions

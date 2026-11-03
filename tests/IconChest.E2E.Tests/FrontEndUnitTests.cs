@@ -502,4 +502,249 @@ public class FrontEndUnitTests
             await browser.DisposeAsync();
         }
     }
+
+    [Theory]
+    [InlineData("chromium")]
+    [InlineData("webkit")]
+    public async Task JavaScriptModules_ContrastAndColor_CalculatesCorrectly(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const { parseHex, normalizeHex, relativeLuminance, contrastRatio, isAccessible, PRESET_PAIRS } = await import('/js/lib/contrast.js');
+
+                    // 1. Parsing & Normalization
+                    const c1 = parseHex('#fff');
+                    if (c1.r !== 255 || c1.g !== 255 || c1.b !== 255) return false;
+                    const c2 = parseHex('000000');
+                    if (c2.r !== 0 || c2.g !== 0 || c2.b !== 0) return false;
+                    if (normalizeHex('#f00') !== '#ff0000') return false;
+
+                    // 2. Relative Luminance
+                    const whiteLum = relativeLuminance(255, 255, 255);
+                    const blackLum = relativeLuminance(0, 0, 0);
+                    if (Math.abs(whiteLum - 1.0) > 0.001) return false;
+                    if (Math.abs(blackLum - 0.0) > 0.001) return false;
+
+                    // 3. Contrast Ratio: Black and White should be 21:1
+                    const bwRatio = contrastRatio('#ffffff', '#000000');
+                    if (Math.abs(bwRatio - 21.0) > 0.1) return false;
+
+                    // 4. Verify all 16 PRESET_PAIRS meet >= 4.5:1 contrast
+                    if (!Array.isArray(PRESET_PAIRS) || PRESET_PAIRS.length !== 16) return false;
+                    for (const pair of PRESET_PAIRS) {
+                        const ratio = contrastRatio(pair.bg, pair.fg);
+                        if (ratio < 4.5) return false;
+                    }
+
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("chromium")]
+    [InlineData("webkit")]
+    public async Task JavaScriptModules_TagComboboxModel_RanksAndValidatesCorrectly(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const { validateTagName, filterAndRankTags, evaluateCreateOption } = await import('/js/lib/tag-combobox-model.js');
+
+                    // 1. Tag name validation
+                    if (validateTagName('').valid) return false;
+                    if (validateTagName('   ').valid) return false;
+                    if (validateTagName('a'.repeat(51)).valid) return false;
+                    if (validateTagName('tag\x00name').valid) return false;
+                    if (validateTagName('tag\nname').valid) return false;
+
+                    const valid = validateTagName('  nature-photo  ');
+                    if (!valid.valid || valid.name !== 'nature-photo') return false;
+
+                    // 2. Ranking: prefix matches first, then substring, alphabetically
+                    const tags = [
+                        { id: 1, name: 'alpine' },
+                        { id: 2, name: 'animal' },
+                        { id: 3, name: 'urban' },
+                        { id: 4, name: 'subalpine' }
+                    ];
+
+                    const ranked = filterAndRankTags(tags, 'al');
+                    // Expected: 'alpine', 'animal' (prefix matches sorted), then 'subalpine' (substring match)
+                    if (ranked.length !== 3) return false;
+                    if (ranked[0].name !== 'alpine') return false;
+                    if (ranked[1].name !== 'animal') return false;
+                    if (ranked[2].name !== 'subalpine') return false;
+
+                    // 3. Create option evaluation
+                    const existingTags = [{ id: 1, name: 'Vector' }, { id: 2, name: 'Icon' }];
+                    const opt1 = evaluateCreateOption(existingTags, 'vector'); // Case-insensitive exact match
+                    if (opt1.canCreate) return false;
+                    if (!opt1.exactMatchTag || opt1.exactMatchTag.name !== 'Vector') return false;
+
+                    const opt2 = evaluateCreateOption(existingTags, 'New Category');
+                    if (!opt2.canCreate || opt2.name !== 'New Category') return false;
+
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("chromium")]
+    [InlineData("webkit")]
+    public async Task JavaScriptModules_EditModel_SingleAndMultiEditLogic_EvaluatesCorrectly(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const { EditModel, isValidDateString } = await import('/js/lib/edit-model.js');
+
+                    // 1. Date Validation
+                    if (!isValidDateString('2026-02-28')) return false;
+                    if (isValidDateString('2026-02-29')) return false; // Non-leap year
+                    if (!isValidDateString('2028-02-29')) return false; // Leap year
+                    if (isValidDateString('2026-13-01')) return false;
+                    if (isValidDateString('invalid')) return false;
+
+                    // 2. Single Edit Model
+                    const singleData = {
+                        id: 'img1',
+                        title: 'Custom Title',
+                        description: 'A description',
+                        rating: 3,
+                        takenOverrideDate: '2026-05-10',
+                        isHidden: false,
+                        tags: [{ id: 10, name: 'Nature', count: 1 }]
+                    };
+
+                    const singleModel = new EditModel(singleData, ['img1']);
+                    if (singleModel.isDirty()) return false;
+
+                    // Edit title to empty string (resets to default filename on server)
+                    singleModel.setTitle('');
+                    if (!singleModel.isDirty()) return false;
+
+                    // Clear description (sets explicit null)
+                    singleModel.setDescription('');
+
+                    // Update rating
+                    singleModel.setRating(5);
+
+                    const singlePatch = singleModel.buildPatchBody();
+                    if (singlePatch.title !== '') return false;
+                    if (singlePatch.description !== null) return false;
+                    if (singlePatch.rating !== 5) return false;
+
+                    // Revert restores clean state
+                    singleModel.revert();
+                    if (singleModel.isDirty()) return false;
+                    if (singleModel.getField('title').value !== 'Custom Title') return false;
+
+                    // 3. Multi-Edit Model with Summary
+                    const summary = {
+                        count: 3,
+                        titleShared: false,
+                        title: null,
+                        descriptionShared: true,
+                        description: 'Shared Desc',
+                        ratingShared: false,
+                        rating: null,
+                        hiddenCount: 1, // mixed
+                        tags: [
+                            { tagId: 1, name: 'TagAll', count: 3 }, // all (1)
+                            { tagId: 2, name: 'TagSome', count: 1 }  // some (0.5)
+                        ]
+                    };
+
+                    const multiModel = new EditModel(summary, ['img1', 'img2', 'img3']);
+                    if (multiModel.isDirty()) return false;
+                    if (!multiModel.getField('title').isMultiple) return false;
+                    if (multiModel.getField('description').isMultiple) return false;
+
+                    // Tri-state tag transitions:
+                    // TagSome (initial 0.5) -> cycle 1: 1 ('all') -> cycle 2: 0 ('remove') -> cycle 3: 0.5 ('untouched')
+                    if (multiModel.getTagState(2) !== 0.5) return false;
+                    multiModel.cycleTag(2);
+                    if (multiModel.getTagState(2) !== 1) return false;
+                    let diff = multiModel.getTagDiff();
+                    if (diff.addTagIds.length !== 1 || diff.addTagIds[0] !== 2) return false;
+
+                    multiModel.cycleTag(2);
+                    if (multiModel.getTagState(2) !== 0) return false;
+                    diff = multiModel.getTagDiff();
+                    if (diff.removeTagIds.length !== 1 || diff.removeTagIds[0] !== 2) return false;
+
+                    multiModel.cycleTag(2);
+                    if (multiModel.getTagState(2) !== 0.5) return false;
+                    diff = multiModel.getTagDiff();
+                    if (diff.addTagIds.length !== 0 || diff.removeTagIds.length !== 0) return false;
+
+                    // Add new tag (initial 0) -> becomes 1
+                    multiModel.addTag(99, { name: 'BrandNew' });
+                    diff = multiModel.getTagDiff();
+                    if (diff.addTagIds.length !== 1 || diff.addTagIds[0] !== 99) return false;
+
+                    const multiPatch = multiModel.buildPatchBody();
+                    if (!multiPatch.addTagIds || multiPatch.addTagIds[0] !== 99) return false;
+
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
 }

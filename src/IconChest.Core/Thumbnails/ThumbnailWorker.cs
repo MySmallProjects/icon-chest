@@ -122,7 +122,11 @@ public sealed class ThumbnailWorker : IThumbnailWorker
         {
             await Task.WhenAll(_workerTasks);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            // Expected during graceful shutdown of worker tasks
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning(ex, "Exception while awaiting thumbnail worker tasks completion.");
         }

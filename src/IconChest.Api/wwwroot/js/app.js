@@ -1,6 +1,7 @@
 import { el, clear, createSvg } from './lib/dom.js';
 import { api, ApiError } from './lib/api.js';
 import { store } from './lib/store.js';
+import { dialog } from './lib/dialog.js';
 import { eventStream } from './lib/events.js';
 import { initResizer } from './lib/resizer.js';
 import { toast } from './lib/toast.js';
@@ -380,8 +381,32 @@ class IconChestApp {
     });
   }
 
-  _onIconClick(viewId) {
+  async _onIconClick(viewId) {
     const currentView = store.get('activeView');
+    const curInst = this.views.get(currentView);
+
+    if (curInst?.hasUnsavedChanges?.()) {
+      const action = await dialog.confirmThree({
+        title: 'Unsaved Changes',
+        message: 'You have unsaved changes. Do you want to save them before leaving this view?',
+        saveText: 'Save',
+        discardText: 'Discard',
+        cancelText: 'Cancel'
+      });
+      if (action === 'save') {
+        const detailsPanel = curInst.getDetailsPanel?.();
+        if (detailsPanel) {
+          const ok = await detailsPanel.save();
+          if (!ok) return;
+        }
+      } else if (action === 'discard') {
+        const detailsPanel = curInst.getDetailsPanel?.();
+        if (detailsPanel) detailsPanel.revert();
+      } else {
+        return; // Cancel navigation
+      }
+    }
+
     const reg = VIEW_REGISTRY.find(v => v.id === viewId);
 
     if (currentView === viewId && reg?.hasPanelA) {

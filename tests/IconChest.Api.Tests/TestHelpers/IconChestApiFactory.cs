@@ -1,12 +1,26 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using IconChest.Core.Native;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace IconChest.Api.Tests.TestHelpers;
+
+public class TestNativeLauncher : INativeLauncher
+{
+    public List<string> OpenedPaths { get; } = new();
+    public bool ShouldFail { get; set; }
+
+    public void OpenFile(string path)
+    {
+        if (ShouldFail) throw new InvalidOperationException("Failed to open file.");
+        OpenedPaths.Add(path);
+    }
+}
 
 [CollectionDefinition("ApiCollection")]
 public class ApiCollection : ICollectionFixture<IconChestApiFactory>
@@ -19,6 +33,7 @@ public class IconChestApiFactory : WebApplicationFactory<Program>
     public string TempDir { get; }
     public string ConfigDir { get; }
     public string DataDir { get; }
+    public TestNativeLauncher FakeLauncher { get; } = new();
 
     public IconChestApiFactory()
     {
@@ -36,6 +51,10 @@ public class IconChestApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.ConfigureServices(services =>
+        {
+            services.AddSingleton<INativeLauncher>(FakeLauncher);
+        });
     }
 
     public async Task<HttpClient> CreateAuthenticatedClientAsync(string secret = DefaultSecret)

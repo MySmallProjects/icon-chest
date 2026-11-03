@@ -2,6 +2,7 @@ import { el, clear } from '../lib/dom.js';
 import { api } from '../lib/api.js';
 import { createTagChip } from '../components/tag-chip.js';
 import { createImageBrowser } from './image-browser.js';
+import { tagsStore } from '../lib/tags-store.js';
 
 export function createTagsView() {
   const browser = createImageBrowser({
@@ -109,11 +110,15 @@ export function createTagsView() {
     }
   }
 
+  tagsStore.init();
+  tagsStore.subscribe((tags) => {
+    tagsList = tags || [];
+    renderTagChips();
+  });
+
   async function loadTags() {
     try {
-      const data = await api.get('/api/tags');
-      tagsList = data || [];
-      renderTagChips();
+      await tagsStore.fetchTags();
     } catch (err) {
       console.error('Failed to load tags:', err);
     }

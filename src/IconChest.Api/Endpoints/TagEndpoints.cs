@@ -9,16 +9,31 @@ namespace IconChest.Api.Endpoints;
 
 public sealed record CreateTagRequest(
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("fgColor")] string? FgColor,
-    [property: JsonPropertyName("bgColor")] string? BgColor);
+    [property: JsonPropertyName("fgColor")] string? FgColor = null,
+    [property: JsonPropertyName("bgColor")] string? BgColor = null,
+    [property: JsonPropertyName("color")] string? Color = null);
 
 public sealed record UpdateTagRequest(
-    [property: JsonPropertyName("name")] string? Name,
-    [property: JsonPropertyName("fgColor")] string? FgColor,
-    [property: JsonPropertyName("bgColor")] string? BgColor);
+    [property: JsonPropertyName("name")] string? Name = null,
+    [property: JsonPropertyName("fgColor")] string? FgColor = null,
+    [property: JsonPropertyName("bgColor")] string? BgColor = null,
+    [property: JsonPropertyName("color")] string? Color = null);
 
 public static class TagEndpoints
 {
+    private static bool IsLightColor(string hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return false;
+        var s = hex.Trim().TrimStart('#');
+        if (s.Length == 3) s = $"{s[0]}{s[0]}{s[1]}{s[1]}{s[2]}{s[2]}";
+        if (s.Length != 6) return false;
+        if (!int.TryParse(s.Substring(0, 2), System.Globalization.NumberStyles.HexNumber, null, out var r)) return false;
+        if (!int.TryParse(s.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, null, out var g)) return false;
+        if (!int.TryParse(s.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, null, out var b)) return false;
+        double lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+        return lum > 0.5;
+    }
+
     public static void MapTagEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/tags").WithTags("Tags");
@@ -31,6 +46,7 @@ public static class TagEndpoints
             {
                 id = t.Id,
                 name = t.Name,
+                color = t.BgColor,
                 fgColor = t.FgColor,
                 bgColor = t.BgColor,
                 count = t.ImageCount
@@ -48,13 +64,21 @@ public static class TagEndpoints
         {
             try
             {
-                var created = tagService.Create(request.Name, request.FgColor, request.BgColor);
+                string? targetBg = request.BgColor ?? request.Color;
+                string? targetFg = request.FgColor;
+                if (targetFg == null && targetBg != null)
+                {
+                    targetFg = IsLightColor(targetBg) ? "#111827" : "#FFFFFF";
+                }
+
+                var created = tagService.Create(request.Name, targetFg, targetBg);
                 eventEmitter.EmitLibraryChanged();
 
                 return Results.Created($"/api/tags/{created.Id}", new
                 {
                     id = created.Id,
                     name = created.Name,
+                    color = created.BgColor,
                     fgColor = created.FgColor,
                     bgColor = created.BgColor,
                     count = 0
@@ -88,6 +112,7 @@ public static class TagEndpoints
             {
                 id = tag.Id,
                 name = tag.Name,
+                color = tag.BgColor,
                 fgColor = tag.FgColor,
                 bgColor = tag.BgColor,
                 count = tag.ImageCount
@@ -106,13 +131,21 @@ public static class TagEndpoints
         {
             try
             {
-                var updated = tagService.Update(id, request.Name, request.FgColor, request.BgColor);
+                string? targetBg = request.BgColor ?? request.Color;
+                string? targetFg = request.FgColor;
+                if (targetFg == null && targetBg != null)
+                {
+                    targetFg = IsLightColor(targetBg) ? "#111827" : "#FFFFFF";
+                }
+
+                var updated = tagService.Update(id, request.Name, targetFg, targetBg);
                 eventEmitter.EmitLibraryChanged();
 
                 return Results.Ok(new
                 {
                     id = updated.Id,
                     name = updated.Name,
+                    color = updated.BgColor,
                     fgColor = updated.FgColor,
                     bgColor = updated.BgColor,
                     count = updated.ImageCount

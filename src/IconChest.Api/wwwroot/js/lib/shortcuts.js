@@ -108,6 +108,30 @@ export const SHORTCUTS = [
     key: 'Type letter',
     description: 'Jump to next tree node matching letter',
     context: 'tree'
+  },
+
+  // Details & Editing (Phase 8)
+  {
+    key: 'Ctrl / Cmd + S',
+    description: 'Save metadata edits in details panel',
+    context: 'details'
+  },
+
+  // Tag Management (Phase 8)
+  {
+    key: 'F2',
+    description: 'Rename focused tag',
+    context: 'tags'
+  },
+  {
+    key: 'Delete',
+    description: 'Delete focused tag',
+    context: 'tags'
+  },
+  {
+    key: 'Shift + F10 / Menu',
+    description: 'Open context menu for focused tag',
+    context: 'tags'
   }
 ];
 

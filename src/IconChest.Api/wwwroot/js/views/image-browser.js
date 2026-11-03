@@ -1,6 +1,7 @@
 import { el, clear, createSvg } from '../lib/dom.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
+import { dialog } from '../lib/dialog.js';
 import { ImageSource } from '../lib/image-source.js';
 import { SelectionModel } from '../lib/selection-model.js';
 import { VirtualGrid } from '../components/virtual-grid.js';
@@ -46,7 +47,29 @@ export function createImageBrowser(options = {}) {
 
   // Details panel instance
   const detailsPanel = new DetailsPanel({
-    backgroundMode
+    backgroundMode,
+    onRestoreSelection: (ids) => {
+      selectionModel.replaceSelection(ids);
+    },
+    onSelectImage: async (id) => {
+      if (imageSource) {
+        const allIds = await imageSource.getOrderedIds();
+        selectionModel.handleClick(id, false, false, allIds);
+      } else {
+        selectionModel.handleClick(id, false, false, []);
+      }
+    },
+    onSaveSuccess: () => {
+      loadData();
+    },
+    onFavouriteToggled: (id, isFav) => {
+      if (virtualGrid) {
+        virtualGrid.renderVisible();
+      }
+      if (options.viewId === 'favourites' && !isFav) {
+        loadData();
+      }
+    }
   });
 
   // Top Toolbar
@@ -281,9 +304,13 @@ export function createImageBrowser(options = {}) {
         onToggleFavourite: async (imageId, isFav) => {
           try {
             await api.patch('/api/images', {
-              ids: [imageId],
+              ids: [Number(imageId)],
+              isFavourite: isFav,
               favourite: isFav
             });
+            if (detailsPanel) {
+              detailsPanel.updateFavourite(Number(imageId), isFav);
+            }
             // If in favourites view and unfavourited, soft refresh
             if (options.viewId === 'favourites' && !isFav) {
               loadData();
@@ -328,7 +355,25 @@ export function createImageBrowser(options = {}) {
     selectAllBtn.disabled = total === 0;
   }
 
-  function setFilter(newFilterParams = {}, newTitle = null) {
+  async function setFilter(newFilterParams = {}, newTitle = null) {
+    if (detailsPanel && detailsPanel.isDirty()) {
+      const action = await dialog.confirmThree({
+        title: 'Unsaved Changes',
+        message: 'You have unsaved changes. Do you want to save them before changing view?',
+        saveText: 'Save',
+        discardText: 'Discard',
+        cancelText: 'Cancel'
+      });
+      if (action === 'save') {
+        const saved = await detailsPanel.save();
+        if (!saved) return;
+      } else if (action === 'discard') {
+        detailsPanel.revert();
+      } else {
+        return;
+      }
+    }
+
     filterParams = { ...newFilterParams };
     if (newTitle !== null) {
       currentTitle = newTitle;
@@ -349,6 +394,7 @@ export function createImageBrowser(options = {}) {
     element: container,
     setFilter,
     refresh,
+    hasUnsavedChanges: () => detailsPanel && detailsPanel.isDirty(),
     getSelectionModel: () => selectionModel,
     getImageSource: () => imageSource,
     getVirtualGrid: () => virtualGrid,
