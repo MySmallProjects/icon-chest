@@ -211,6 +211,34 @@ public static class FolderEndpoints
         .WithName("StartScans")
         .WithSummary("Starts background scans for specified or all enabled folders");
 
+        group.MapPost("/scans/all", (
+            HttpContext context,
+            ILibraryFolderService folderService,
+            IScanJobManager scanJobManager) =>
+        {
+            var targetFolderIds = folderService.ListFolders().Where(f => f.Enabled).Select(f => f.Id).ToList();
+            var jobs = new List<object>();
+            foreach (var fid in targetFolderIds)
+            {
+                try
+                {
+                    var job = scanJobManager.StartScan(fid);
+                    jobs.Add(new
+                    {
+                        jobId = job.JobId,
+                        folderId = job.FolderId,
+                        status = job.Status.ToString().ToLowerInvariant()
+                    });
+                }
+                catch (ScanAlreadyRunningException)
+                {
+                }
+            }
+            return Results.Accepted("/api/scans", new { jobs });
+        })
+        .WithName("ScanAllFolders")
+        .WithSummary("Starts background scans for all enabled folders");
+
         // 7. GET /api/scans
         group.MapGet("/scans", (IScanJobManager scanJobManager) =>
         {

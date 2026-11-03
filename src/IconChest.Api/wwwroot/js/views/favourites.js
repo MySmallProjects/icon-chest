@@ -1,10 +1,18 @@
-import { createPlaceholderView } from './placeholder.js';
+import { createImageBrowser } from './image-browser.js';
 
 export function createFavouritesView() {
-  return createPlaceholderView(
-    'Favourites',
-    'Arriving in Phase 7',
-    'Quick access to all icons marked as favourite across all library folders.'
-  );
-}
+  const browser = createImageBrowser({
+    viewId: 'favourites',
+    defaultTitle: 'Favourites',
+    initialFilter: {
+      favourite: true
+    }
+  });
 
+  return {
+    element: browser.element,
+    refresh: () => {
+      browser.refresh();
+    }
+  };
+}

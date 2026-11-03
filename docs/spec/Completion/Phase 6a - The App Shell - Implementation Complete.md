@@ -1,6 +1,4 @@
 
-I'm not sure where this text came from?
-
 # Phase 6: The App Shell — Implementation Complete
 
 ## Overview

@@ -80,3 +80,27 @@ Cache-Control: no-cache
 ```
 accompanied by an `ETag`. The browser always validates whether the assets have changed before serving from local cache, guaranteeing that application upgrades immediately take effect without stale cached modules.
 
+---
+
+## 5. Browse and View Architecture (Phase 7)
+
+### 5.1 Pure Arithmetic & Logic Modules
+All algorithms that do not require DOM access are isolated into testable, data-agnostic ES modules:
+* `grid-geometry.js`: Computes columns, rows, cell bounding boxes, visible index ranges with top/bottom buffer rows, scroll anchoring when changing thumbnail sizes, and marquee axis-aligned bounding box (AABB) hit testing.
+* `selection-model.js`: Implements multi-selection state machine (click, Ctrl-toggle, Shift-range, Ctrl+Shift-range, select all, clear, and valid ID retention).
+* `keyboard-nav.js`: Calculates 2D grid matrix navigation indices for arrow keys, Home, End, PageUp, PageDown, and short terminal rows.
+* `thumb-loader.js`: Selects thumbnail size (`64`, `128`, `256`) based on cell size and device pixel ratio (`window.devicePixelRatio`), and schedules 202 retry attempts with exponential backoff (1s, 2s, 4s, 8s).
+* `image-source.js`: Paged image loading (200 items/page), LRU cache eviction (max 20 pages, protecting visible pages), in-flight de-duplication, aborting stale fetch requests, soft refresh, and lazy ordered ID caching.
+* `tree-model.js`: Hierarchical node flattening, WAI-ARIA arrow key navigation, parent expansion, and type-ahead character matching.
+* `shortcuts.js`: Single-source registry of keyboard shortcuts for grid navigation, full-window preview, and tree management.
+
+### 5.2 Virtual Grid Implementation (`virtual-grid.js`)
+* **Bounded DOM Pool:** Maintains a fixed pool of recycled DOM cell elements (`~80-150` elements depending on window height), positioning them via hardware-accelerated CSS `transform: translate3d(x, y, 0)`.
+* **Zero Layout Trashing:** Never calls `offsetHeight` or `getBoundingClientRect` during the scroll hot path; scroll coordinates are mapped directly to row indices via arithmetic.
+* **Marquee Selection:** Pointer down on unoccupied grid space initiates rubber-band selection with edge auto-scrolling and live arithmetic hit testing.
+* **Background Modes:** Provides checkerboard, light, and dark transparency backgrounds for icons with alpha channels.
+
+### 5.3 Modal Preview & Details Drawer
+* `preview.js`: Full-viewport modal overlay (`role="dialog"`, `aria-modal="true"`) setting `inert` on the application root. Supports navigation arrows, preload of adjacent images, and an info HUD toggled via the `I` key.
+* `details-panel.js`: Collapsible 260–480px side drawer displaying image dimensions, file size, hash, EXIF metadata, tag chips, and read-only star ratings.
+

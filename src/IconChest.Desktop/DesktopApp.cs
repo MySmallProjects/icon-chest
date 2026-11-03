@@ -174,8 +174,9 @@ public sealed class DesktopApp
             HandleWebMessage(message);
         });
 
-        // Navigate to API root
-        _window.Load(_apiUri);
+        // Navigate to API root with handoff secret
+        var handoffUrl = new Uri($"{_apiUri}#handoff={_secret}");
+        _window.Load(handoffUrl);
 
         _window.WaitForClose();
 
@@ -204,9 +205,9 @@ public sealed class DesktopApp
 
             if (type == "getSecret")
             {
-                // Deliver secret via custom event to the web page
-                var script = $"window.dispatchEvent(new CustomEvent('iconchest-secret', {{ detail: '{_secret}' }}));";
-                _window?.SendWebMessage(script);
+                // Deliver secret via WebMessage payload and custom event
+                var payload = JsonSerializer.Serialize(new { type = "secret", secret = _secret });
+                _window?.SendWebMessage(payload);
             }
             else if (type == "pickFolder")
             {
@@ -214,9 +215,8 @@ public sealed class DesktopApp
                 var pickedFolders = _window?.ShowOpenFolder();
                 var selected = (pickedFolders != null && pickedFolders.Length > 0) ? pickedFolders[0] : null;
 
-                var escapedPath = selected != null ? JsonSerializer.Serialize(selected) : "null";
-                var script = $"window.dispatchEvent(new CustomEvent('iconchest-folder-picked', {{ detail: {escapedPath} }}));";
-                _window?.SendWebMessage(script);
+                var payload = JsonSerializer.Serialize(new { type = "folderPicked", path = selected });
+                _window?.SendWebMessage(payload);
             }
         }
         catch (Exception ex)

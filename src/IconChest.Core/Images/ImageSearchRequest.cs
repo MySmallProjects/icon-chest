@@ -21,6 +21,7 @@ public sealed class ImageSearchRequest
 
     public string DateField { get; set; } = "effective"; // effective | created | modified | taken | added
     public int? Year { get; set; }
+    public bool YearUnknown { get; set; }
     public int? Month { get; set; }
     public string? DateFrom { get; set; } // yyyy-mm-dd
     public string? DateTo { get; set; }   // yyyy-mm-dd

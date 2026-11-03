@@ -77,6 +77,14 @@ public class E2EFixture : IAsyncLifetime
         }
     }
 
+    public System.Data.IDbConnection OpenDbConnection()
+    {
+        var dbPath = Path.Combine(TempDir, "iconchest.db");
+        var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");
+        conn.Open();
+        return conn;
+    }
+
     public async Task DisposeAsync()
     {
         if (PlaywrightInstance != null)

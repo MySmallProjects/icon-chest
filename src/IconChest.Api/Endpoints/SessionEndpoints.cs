@@ -42,20 +42,22 @@ public static class SessionEndpoints
             bool authenticated = false;
             string mode = "secret";
 
-            // 2. Secret authentication (loopback only)
-            if (!string.IsNullOrWhiteSpace(request.Secret))
+            // 2. Secret authentication (loopback only - via secret or password field)
+            var secretCandidate = !string.IsNullOrWhiteSpace(request.Secret)
+                ? request.Secret
+                : (context.IsLoopback() ? request.Password : null);
+
+            if (!string.IsNullOrWhiteSpace(secretCandidate) && context.IsLoopback())
             {
-                if (context.IsLoopback())
+                if (PasswordHasher.VerifySecret(secretCandidate, expectedSecret))
                 {
-                    if (PasswordHasher.VerifySecret(request.Secret, expectedSecret))
-                    {
-                        authenticated = true;
-                        mode = "secret";
-                    }
+                    authenticated = true;
+                    mode = "secret";
                 }
             }
+
             // 3. Password authentication (allowed from anywhere when LAN password is set)
-            else if (!string.IsNullOrWhiteSpace(request.Password))
+            if (!authenticated && !string.IsNullOrWhiteSpace(request.Password))
             {
                 var lanPasswordHash = settingsService.Current.Api.LanPasswordHash;
                 if (!string.IsNullOrWhiteSpace(lanPasswordHash))

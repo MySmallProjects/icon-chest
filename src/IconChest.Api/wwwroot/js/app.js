@@ -50,6 +50,7 @@ class IconChestApp {
 
   async start() {
     this._preventFileDropNavigation();
+    this._initNativeBridge();
 
     // Check session authentication
     const authSuccess = await this._authenticate();
@@ -66,6 +67,26 @@ class IconChestApp {
     window.addEventListener('hashchange', () => this._handleRoute());
   }
 
+  _initNativeBridge() {
+    if (window.external && typeof window.external.receiveMessage === 'function') {
+      store.set('isNativeBridgeAvailable', true);
+      window.external.receiveMessage((msg) => {
+        try {
+          const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+          if (data && data.type) {
+            if (data.type === 'folderPicked') {
+              window.dispatchEvent(new CustomEvent('iconchest-folder-picked', { detail: data.path }));
+            } else if (data.type === 'secret') {
+              window.dispatchEvent(new CustomEvent('iconchest-secret', { detail: data.secret }));
+            }
+          }
+        } catch (err) {
+          console.warn('Native bridge message parse error:', err, msg);
+        }
+      });
+    }
+  }
+
   _preventFileDropNavigation() {
     window.addEventListener('dragover', (e) => e.preventDefault(), false);
     window.addEventListener('drop', (e) => e.preventDefault(), false);
@@ -78,11 +99,44 @@ class IconChestApp {
       return true;
     }
 
-    // 2. Desktop Photino Message Bridge
+    // 2. Browser / Window Handoff Fragment (#handoff=<secret>)
+    const hash = window.location.hash;
+    if (hash.includes('handoff=')) {
+      const match = hash.match(/handoff=([^&]+)/);
+      if (match && match[1]) {
+        const secret = decodeURIComponent(match[1]);
+        // Clear fragment immediately from URL and history so secret is not exposed
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        try {
+          await api.loginWithSecret(secret);
+          return true;
+        } catch {}
+      }
+    }
+
+    // 3. Desktop Photino Message Bridge
     if (window.external && typeof window.external.sendMessage === 'function') {
       try {
         const secret = await new Promise((resolve, reject) => {
           const timeout = setTimeout(() => reject(new Error('Bridge timeout')), 3000);
+
+          if (typeof window.external.receiveMessage === 'function') {
+            window.external.receiveMessage((msg) => {
+              try {
+                const data = JSON.parse(msg);
+                if (data.type === 'secret') {
+                  clearTimeout(timeout);
+                  resolve(data.secret);
+                }
+              } catch {
+                if (msg && typeof msg === 'string') {
+                  clearTimeout(timeout);
+                  resolve(msg);
+                }
+              }
+            });
+          }
+
           const handler = (event) => {
             window.removeEventListener('iconchest-secret', handler);
             clearTimeout(timeout);
@@ -97,21 +151,6 @@ class IconChestApp {
           return true;
         }
       } catch {}
-    }
-
-    // 3. Browser Handoff Fragment (#handoff=<secret>)
-    const hash = window.location.hash;
-    if (hash.includes('handoff=')) {
-      const match = hash.match(/handoff=([^&]+)/);
-      if (match && match[1]) {
-        const secret = decodeURIComponent(match[1]);
-        // Clear fragment immediately from URL and history
-        history.replaceState(null, '', window.location.pathname + window.location.search);
-        try {
-          await api.loginWithSecret(secret);
-          return true;
-        } catch {}
-      }
     }
 
     return false;

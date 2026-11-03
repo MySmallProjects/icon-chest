@@ -102,6 +102,10 @@ class ApiClient {
     return this.request(path, { ...options, method: 'DELETE' });
   }
 
+  async getImage(id) {
+    return await this.get(`/api/images/${id}`);
+  }
+
   async checkSession() {
     try {
       return await this.get('/api/session');

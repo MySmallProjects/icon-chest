@@ -36,7 +36,7 @@ public static class ImageEndpoints
             string? directory,
             bool? includeSubfolders,
             string? dateField,
-            int? year,
+            string? year,
             int? month,
             string? dateFrom,
             string? dateTo,
@@ -107,13 +107,21 @@ public static class ImageEndpoints
             var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
             var typesList = query["type"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
 
+            bool yearUnknown = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
+            int? parsedYear = null;
+            if (!yearUnknown && int.TryParse(year, out var yVal))
+            {
+                parsedYear = yVal;
+            }
+
             var request = new ImageSearchRequest
             {
                 FolderId = folderId,
                 Directory = directory,
                 IncludeSubfolders = includeSubfolders ?? false,
                 DateField = dateField ?? "effective",
-                Year = year,
+                Year = parsedYear,
+                YearUnknown = yearUnknown,
                 Month = month,
                 DateFrom = dateFrom,
                 DateTo = dateTo,
@@ -158,7 +166,7 @@ public static class ImageEndpoints
             string? directory,
             bool? includeSubfolders,
             string? dateField,
-            int? year,
+            string? year,
             int? month,
             string? dateFrom,
             string? dateTo,
@@ -228,13 +236,21 @@ public static class ImageEndpoints
             var tagsList = query["tag"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
             var typesList = query["type"].Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
 
+            bool yearUnknown = string.Equals(year, "unknown", StringComparison.OrdinalIgnoreCase);
+            int? parsedYear = null;
+            if (!yearUnknown && int.TryParse(year, out var yVal))
+            {
+                parsedYear = yVal;
+            }
+
             var request = new ImageSearchRequest
             {
                 FolderId = folderId,
                 Directory = directory,
                 IncludeSubfolders = includeSubfolders ?? false,
                 DateField = dateField ?? "effective",
-                Year = year,
+                Year = parsedYear,
+                YearUnknown = yearUnknown,
                 Month = month,
                 DateFrom = dateFrom,
                 DateTo = dateTo,

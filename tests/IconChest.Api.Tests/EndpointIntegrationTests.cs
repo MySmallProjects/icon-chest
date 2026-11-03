@@ -214,4 +214,28 @@ public class EndpointIntegrationTests
         Assert.True(rootRes.Headers.CacheControl?.NoCache == true ||
                     rootRes.Headers.CacheControl?.ToString().Contains("no-cache") == true);
     }
+
+    [Fact]
+    public async Task Images_Search_And_Ids_SupportYearUnknown()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+
+        // 1. Test GET /api/images?year=unknown
+        var listRes = await client.GetAsync("/api/images?year=unknown&dateField=effective");
+        Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
+        var listJson = await listRes.Content.ReadAsStringAsync();
+        using var listDoc = JsonDocument.Parse(listJson);
+        Assert.True(listDoc.RootElement.TryGetProperty("total", out _));
+
+        // 2. Test GET /api/images/ids?year=unknown
+        var idsRes = await client.GetAsync("/api/images/ids?year=unknown&dateField=effective");
+        Assert.Equal(HttpStatusCode.OK, idsRes.StatusCode);
+        var idsJson = await idsRes.Content.ReadAsStringAsync();
+        using var idsDoc = JsonDocument.Parse(idsJson);
+        Assert.Equal(JsonValueKind.Array, idsDoc.RootElement.ValueKind);
+
+        // 3. Test with dateField=taken
+        var takenRes = await client.GetAsync("/api/images?year=unknown&dateField=taken");
+        Assert.Equal(HttpStatusCode.OK, takenRes.StatusCode);
+    }
 }

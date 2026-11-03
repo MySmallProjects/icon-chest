@@ -54,8 +54,17 @@ export function clear(element) {
  * Creates SVG element safely from trusted inline SVG markup (no server data).
  */
 export function createSvg(svgMarkup) {
+  const template = document.createElement('template');
+  template.innerHTML = svgMarkup.trim();
+  const el = template.content.firstElementChild;
+  if (el && el.namespaceURI === 'http://www.w3.org/2000/svg') {
+    return el.cloneNode(true);
+  }
+  const withNs = svgMarkup.includes('xmlns=')
+    ? svgMarkup
+    : svgMarkup.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
   const parser = new DOMParser();
-  const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
-  return doc.documentElement;
+  const doc = parser.parseFromString(withNs, 'image/svg+xml');
+  return document.importNode(doc.documentElement, true);
 }
 

@@ -182,7 +182,11 @@ public sealed class ImageSearchService : IImageSearchService
         string dateCol = ResolveDateFieldColumn(request.DateField);
 
         // Year & Month filter on dateCol
-        if (request.Year.HasValue && request.Month.HasValue)
+        if (request.YearUnknown)
+        {
+            conditions.Add($"{dateCol} IS NULL");
+        }
+        else if (request.Year.HasValue && request.Month.HasValue)
         {
             int y = request.Year.Value;
             int m = Math.Clamp(request.Month.Value, 1, 12);

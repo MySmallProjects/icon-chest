@@ -52,6 +52,8 @@ export function renderLibrarySection() {
             });
             if (chosen) {
               folderInput.value = chosen;
+              folderInput.dispatchEvent(new Event('input', { bubbles: true }));
+              folderInput.focus();
             }
           } catch (err) {
             console.error('Folder picker error:', err);
@@ -397,7 +399,7 @@ export function renderLibrarySection() {
 
   async function handleScanAll() {
     try {
-      await api.post('/api/scans/all');
+      await api.post('/api/scans', {});
       toast.info('Scan started for all enabled folders.');
       await checkRunningScans();
     } catch (err) {
