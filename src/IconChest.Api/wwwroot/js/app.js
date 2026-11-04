@@ -5,6 +5,7 @@ import { dialog } from './lib/dialog.js';
 import { eventStream } from './lib/events.js';
 import { initResizer } from './lib/resizer.js';
 import { toast } from './lib/toast.js';
+import { bridge } from './lib/bridge.js';
 
 import { createFoldersView } from './views/folders.js';
 import { createYearsView } from './views/years.js';
@@ -69,23 +70,8 @@ class IconChestApp {
   }
 
   _initNativeBridge() {
-    if (window.external && typeof window.external.receiveMessage === 'function') {
-      store.set('isNativeBridgeAvailable', true);
-      window.external.receiveMessage((msg) => {
-        try {
-          const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
-          if (data && data.type) {
-            if (data.type === 'folderPicked') {
-              window.dispatchEvent(new CustomEvent('iconchest-folder-picked', { detail: data.path }));
-            } else if (data.type === 'secret') {
-              window.dispatchEvent(new CustomEvent('iconchest-secret', { detail: data.secret }));
-            }
-          }
-        } catch (err) {
-          console.warn('Native bridge message parse error:', err, msg);
-        }
-      });
-    }
+    bridge.init();
+    store.set('isNativeBridgeAvailable', bridge.isAvailable());
   }
 
   _preventFileDropNavigation() {
@@ -282,6 +268,11 @@ class IconChestApp {
       });
       btn.appendChild(createSvg(item.icon));
 
+      if (item.id === 'missing') {
+        const badge = el('span', { className: 'nav-badge hidden', id: 'nav-badge-missing' });
+        btn.appendChild(badge);
+      }
+
       this.iconButtons.set(item.id, btn);
       if (item.group === 'bottom') {
         bottomGroup.appendChild(btn);
@@ -342,6 +333,26 @@ class IconChestApp {
 
     root.appendChild(mainContainer);
     root.appendChild(statusBar);
+
+    // Maintenance overlay
+    const maintenanceOverlay = el('div', {
+      id: 'maintenance-overlay',
+      className: 'maintenance-overlay hidden',
+      role: 'alert',
+      'aria-live': 'assertive'
+    },
+      el('div', { className: 'maintenance-card' },
+        el('div', { className: 'spinner-icon' }),
+        el('p', { className: 'maintenance-title' }, 'Updating the library, one moment…')
+      )
+    );
+    root.appendChild(maintenanceOverlay);
+
+    api.onMaintenance = (active) => {
+      maintenanceOverlay.classList.toggle('hidden', !active);
+    };
+
+    this.updateMissingBadge();
   }
 
   _initEvents() {
@@ -369,6 +380,8 @@ class IconChestApp {
         scanText.textContent = 'Scan completed.';
         setTimeout(() => { scanText.textContent = 'Ready'; }, 4000);
       }
+      this.updateMissingBadge();
+      this._reloadActiveView();
     });
 
     eventStream.on('thumb.progress', (data) => {
@@ -383,6 +396,51 @@ class IconChestApp {
         thumbText.style.display = 'none';
       }
     });
+
+    eventStream.on('data.reloaded', () => {
+      window.dispatchEvent(new CustomEvent('iconchest-data-reloaded'));
+      this.updateMissingBadge();
+      this._reloadActiveView();
+    });
+
+    eventStream.on('library.changed', () => {
+      window.dispatchEvent(new CustomEvent('iconchest-library-changed'));
+      this.updateMissingBadge();
+      this._reloadActiveView();
+    });
+
+    window.addEventListener('iconchest-data-reloaded', () => {
+      this.updateMissingBadge();
+      this._reloadActiveView();
+    });
+  }
+
+  async updateMissingBadge() {
+    try {
+      const res = await api.get('/api/missing?limit=1');
+      const count = res?.total ?? 0;
+      const badge = document.getElementById('nav-badge-missing');
+      if (badge) {
+        if (count > 0) {
+          badge.textContent = count > 99 ? '99+' : String(count);
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+    } catch {}
+  }
+
+  _reloadActiveView() {
+    const currentView = store.get('activeView');
+    const viewInstance = this.views.get(currentView);
+    if (typeof viewInstance?.reload === 'function') {
+      viewInstance.reload();
+    } else if (typeof viewInstance?.refresh === 'function') {
+      viewInstance.refresh();
+    } else if (typeof viewInstance?.onActivated === 'function') {
+      viewInstance.onActivated();
+    }
   }
 
   async _onIconClick(viewId) {
@@ -491,6 +549,9 @@ class IconChestApp {
       this._updatePanelAVisibility(reg, viewInstance);
     } catch (err) {
       console.error('Routing error in IconChest:', err);
+      if (typeof window.logClientError === 'function') {
+        window.logClientError(`Routing error in IconChest: ${err.message}`, err.stack);
+      }
     }
   }
 

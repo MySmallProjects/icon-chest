@@ -5,6 +5,7 @@ namespace IconChest.Core.Data;
 public interface IIconChestDatabase
 {
     string DatabasePath { get; }
+    int SupportedSchemaVersion { get; }
     int GetSchemaVersion();
     int Migrate();
     SqliteConnection OpenConnection();

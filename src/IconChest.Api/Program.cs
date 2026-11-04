@@ -110,10 +110,11 @@ settingsService.SettingsChanged += (_, s) =>
     appLogging.SetLevel(s.LogLevel);
 };
 
-var database = new IconChestDatabase(settingsService);
+var dbGate = new DbGate();
+var database = new IconChestDatabase(settingsService, dbGate: dbGate);
 database.Migrate();
 
-var connFactory = new DatabaseConnectionFactory(database.DatabasePath);
+var connFactory = new DatabaseConnectionFactory(database.DatabasePath, dbGate);
 
 // 4. Kestrel server binding configuration
 var currentSettings = settingsService.Current;
@@ -148,7 +149,9 @@ builder.Services.AddSingleton(appLogging.LoggerFactory);
 builder.Services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
 
 builder.Services.AddSingleton<IIconChestDatabase>(database);
+builder.Services.AddSingleton<IDbGate>(dbGate);
 builder.Services.AddSingleton<IDatabaseConnectionFactory>(connFactory);
+builder.Services.AddSingleton<IDataMaintenanceService, DataMaintenanceService>();
 
 // Repositories
 builder.Services.AddSingleton<ILibraryFolderRepository, LibraryFolderRepository>();
@@ -237,6 +240,7 @@ var app = builder.Build();
 // 7. Pipeline configuration
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 app.UseMiddleware<SecurityMiddleware>();
+app.UseMiddleware<DbGateMiddleware>();
 app.UseMiddleware<SessionAuthenticationMiddleware>();
 
 if (enableSwagger)
@@ -295,6 +299,7 @@ app.MapMissingEndpoints();
 app.MapThumbnailEndpoints();
 app.MapEventEndpoints();
 app.MapNativeEndpoints();
+app.MapDataEndpoints();
 
 // SPA fallback for non-/api paths
 app.MapFallbackToFile("index.html", new StaticFileOptions

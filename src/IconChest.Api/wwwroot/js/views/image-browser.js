@@ -309,11 +309,24 @@ export function createImageBrowser(options = {}) {
       return;
     }
 
+    // Ctrl+F / Cmd+F toggles filter bar visibility
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      const willShow = !filterBar.isVisible();
+      setFilterBarVisible(willShow);
+      if (willShow) {
+        filterBar.focus();
+      } else {
+        if (virtualGrid) virtualGrid.focus();
+      }
+      return;
+    }
+
     const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) ||
       document.activeElement?.isContentEditable;
 
     if (!isInput) {
-      if (e.key === '/' || ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F'))) {
+      if (e.key === '/') {
         e.preventDefault();
         setFilterBarVisible(true);
         filterBar.focus();
@@ -383,16 +396,25 @@ export function createImageBrowser(options = {}) {
     const preQuery = store.get('preloadQuery');
     if (preQuery) {
       store.set('preloadQuery', null);
-      setFilterBarVisible(true);
-      if (filterBar.currentMode !== 'advanced') {
-        filterBar.switchMode('advanced');
-      }
-      filterBar.queryBox.setQuery(preQuery);
-      userFilterParams = { q: preQuery };
-      loadData();
+      applyQuery(preQuery);
       return true;
     }
     return false;
+  }
+
+  function applyQuery(queryText) {
+    scopeParams = {};
+    currentTitle = options.defaultTitle || 'All Images';
+    titleEl.textContent = currentTitle;
+    setFilterBarVisible(true);
+    if (filterBar.activeMode !== 'advanced') {
+      filterBar.switchMode('advanced');
+    }
+    filterBar.queryBox.setQuery(queryText);
+    userFilterParams = { q: queryText };
+    filterBar.appliedQuery = queryText;
+    filterBar._updateActiveChips();
+    loadData();
   }
 
   const unsubscribeStore = store.subscribe('preloadQuery', (val) => {
@@ -555,6 +577,8 @@ export function createImageBrowser(options = {}) {
     element: container,
     setFilter,
     refresh,
+    reload: () => loadData(),
+    applyQuery,
     onActivated: () => {
       checkPreloadQuery();
       const currentSettings = store.get('settings') || {};
@@ -567,6 +591,7 @@ export function createImageBrowser(options = {}) {
       if (virtualGrid && virtualGrid.backgroundMode !== newBg) {
         virtualGrid.setBackgroundMode(newBg);
       }
+      loadData();
     },
     hasUnsavedChanges: () => detailsPanel && detailsPanel.isDirty(),
     getSelectionModel: () => selectionModel,

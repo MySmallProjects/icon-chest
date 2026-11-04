@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <VersionMajor Condition="'$(VersionMajor)' == ''">0</VersionMajor>
-    <VersionMinor Condition="'$(VersionMinor)' == ''">1</VersionMinor>
+    <VersionMinor Condition="'$(VersionMinor)' == ''">10</VersionMinor>
 
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>

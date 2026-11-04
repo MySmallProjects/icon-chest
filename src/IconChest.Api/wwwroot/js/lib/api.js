@@ -19,8 +19,10 @@ export class ApiError extends Error {
 class ApiClient {
   constructor() {
     this.onAuthRequired = null;
+    this.onMaintenance = null;
     this.isReauthenticating = false;
     this._authPendingQueue = [];
+    this._activeMaintenanceCount = 0;
   }
 
   async request(path, options = {}) {
@@ -55,6 +57,22 @@ class ApiClient {
       // Mid-session re-auth
       if (!url.startsWith('/api/session')) {
         return this._handle401(path, options);
+      }
+    }
+
+    if (response.status === 503) {
+      const retryHeader = response.headers.get('Retry-After');
+      let isMaintenance = Boolean(retryHeader);
+      let problem = null;
+      try {
+        problem = await response.clone().json();
+        if (problem?.type?.includes('maintenance') || problem?.detail?.includes('maintenance')) {
+          isMaintenance = true;
+        }
+      } catch {}
+
+      if (isMaintenance) {
+        return this._handle503Maintenance(path, options, retryHeader);
       }
     }
 
@@ -140,6 +158,26 @@ class ApiClient {
 
   async logout() {
     return await this.delete('/api/session');
+  }
+
+  async _handle503Maintenance(path, options, retryHeader) {
+    const retrySec = parseInt(retryHeader || '2', 10);
+    const delayMs = Math.max(1, isNaN(retrySec) ? 2 : retrySec) * 1000;
+
+    this._activeMaintenanceCount++;
+    if (this._activeMaintenanceCount === 1 && typeof this.onMaintenance === 'function') {
+      try { this.onMaintenance(true); } catch (_) {}
+    }
+
+    try {
+      await new Promise((res) => setTimeout(res, delayMs));
+      return await this.request(path, options);
+    } finally {
+      this._activeMaintenanceCount = Math.max(0, this._activeMaintenanceCount - 1);
+      if (this._activeMaintenanceCount === 0 && typeof this.onMaintenance === 'function') {
+        try { this.onMaintenance(false); } catch (_) {}
+      }
+    }
   }
 
   async _handle401(path, options) {

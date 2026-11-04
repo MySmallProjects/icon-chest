@@ -1,5 +1,6 @@
 import { el, clear } from '../lib/dom.js';
 import { api } from '../lib/api.js';
+import { store } from '../lib/store.js';
 import { TreeView } from '../components/tree.js';
 import { createImageBrowser } from './image-browser.js';
 
@@ -102,13 +103,33 @@ export function createFoldersView() {
       return panelAContent;
     },
     onActivated: () => {
-      if (typeof browser.onActivated === 'function') {
-        browser.onActivated();
+      loadTree();
+      const pendingQuery = store.get('pendingFilterQuery');
+      if (pendingQuery) {
+        store.set('pendingFilterQuery', null);
+        selectedNode = null;
+        if (treeView) treeView.select(null);
+        browser.applyQuery(pendingQuery);
+      } else {
+        if (typeof browser.onActivated === 'function') {
+          browser.onActivated();
+        }
       }
+    },
+    reload: () => {
+      loadTree();
+      browser.refresh();
     },
     refresh: () => {
       loadTree();
       browser.refresh();
-    }
+    },
+    applyQuery: (q) => {
+      selectedNode = null;
+      if (treeView) treeView.select(null);
+      browser.applyQuery(q);
+    },
+    hasUnsavedChanges: () => browser.hasUnsavedChanges?.(),
+    getDetailsPanel: () => browser.getDetailsPanel?.()
   };
 }

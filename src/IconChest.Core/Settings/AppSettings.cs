@@ -64,6 +64,7 @@ public sealed class AppSettings
     public int Version { get; set; } = 1;
     public string? DbPath { get; set; } = null;
     public string? ThumbnailCachePath { get; set; } = null;
+    public string? BackupFolder { get; set; } = null;
     public int ThumbnailCacheMaxMb { get; set; } = 2048;
     public int ThumbnailQuality { get; set; } = 85;
     public int ThumbnailWorkers { get; set; } = 0;
@@ -94,11 +95,13 @@ public sealed class AppSettings
     [JsonExtensionData]
     public Dictionary<string, JsonElement> ExtensionData { get; set; } = new();
 
-    public void Validate()
+    public void Validate() => Validate(null);
+
+    public void Validate(IEnumerable<string>? libraryFolderPaths)
     {
-        if (ThumbnailCacheMaxMb < 0)
+        if (ThumbnailCacheMaxMb < 64 || ThumbnailCacheMaxMb > 1_048_576)
         {
-            throw new ArgumentOutOfRangeException(nameof(ThumbnailCacheMaxMb), "Thumbnail cache max size cannot be negative.");
+            throw new ArgumentOutOfRangeException(nameof(ThumbnailCacheMaxMb), "Thumbnail cache max size must be between 64 and 1,048,576 MB.");
         }
 
         if (ThumbnailQuality < 1 || ThumbnailQuality > 100)
@@ -106,14 +109,14 @@ public sealed class AppSettings
             throw new ArgumentOutOfRangeException(nameof(ThumbnailQuality), "Thumbnail quality must be between 1 and 100.");
         }
 
-        if (ThumbnailWorkers < 0)
+        if (ThumbnailWorkers < 0 || ThumbnailWorkers > 32)
         {
-            throw new ArgumentOutOfRangeException(nameof(ThumbnailWorkers), "Thumbnail workers cannot be negative.");
+            throw new ArgumentOutOfRangeException(nameof(ThumbnailWorkers), "Thumbnail workers must be between 0 and 32.");
         }
 
-        if (ScanWorkers < 0)
+        if (ScanWorkers < 0 || ScanWorkers > 32)
         {
-            throw new ArgumentOutOfRangeException(nameof(ScanWorkers), "Scan workers cannot be negative.");
+            throw new ArgumentOutOfRangeException(nameof(ScanWorkers), "Scan workers must be between 0 and 32.");
         }
 
         if (Window.Width <= 0 || Window.Height <= 0)
@@ -121,9 +124,14 @@ public sealed class AppSettings
             throw new ArgumentOutOfRangeException(nameof(Window), "Window width and height must be positive.");
         }
 
-        if (Api.PortPreference < 0 || Api.PortPreference > 65535)
+        if (Api.PortPreference != 0 && (Api.PortPreference < 1024 || Api.PortPreference > 65535))
         {
-            throw new ArgumentOutOfRangeException(nameof(Api.PortPreference), "Port preference must be between 0 and 65535.");
+            throw new ArgumentOutOfRangeException(nameof(Api.PortPreference), "Port preference must be 0 or between 1024 and 65535.");
+        }
+
+        if (Api.AllowLan && string.IsNullOrWhiteSpace(Api.LanPasswordHash))
+        {
+            throw new InvalidOperationException("API LAN access cannot be enabled without setting a LAN password.");
         }
 
         if (string.IsNullOrWhiteSpace(IncludePatterns))
@@ -140,6 +148,32 @@ public sealed class AppSettings
         {
             DefaultView = "Folders";
         }
+
+        if (libraryFolderPaths != null)
+        {
+            ValidateNotInsideLibraryFolders(DbPath, nameof(DbPath), libraryFolderPaths);
+            ValidateNotInsideLibraryFolders(ThumbnailCachePath, nameof(ThumbnailCachePath), libraryFolderPaths);
+            ValidateNotInsideLibraryFolders(BackupFolder, nameof(BackupFolder), libraryFolderPaths);
+        }
+    }
+
+    private static void ValidateNotInsideLibraryFolders(string? path, string propertyName, IEnumerable<string> libraryFolderPaths)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        var fullPath = Path.GetFullPath(path);
+
+        foreach (var libPath in libraryFolderPaths)
+        {
+            if (string.IsNullOrWhiteSpace(libPath)) continue;
+            var fullLibPath = Path.GetFullPath(libPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            if (fullPath.Equals(fullLibPath, StringComparison.OrdinalIgnoreCase) ||
+                fullPath.StartsWith(fullLibPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                fullPath.StartsWith(fullLibPath + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException($"Path '{path}' in {propertyName} must not be inside library folder '{libPath}'.", propertyName);
+            }
+        }
     }
 
     public AppSettings Clone()
@@ -149,6 +183,7 @@ public sealed class AppSettings
             Version = Version,
             DbPath = DbPath,
             ThumbnailCachePath = ThumbnailCachePath,
+            BackupFolder = BackupFolder,
             ThumbnailCacheMaxMb = ThumbnailCacheMaxMb,
             ThumbnailQuality = ThumbnailQuality,
             ThumbnailWorkers = ThumbnailWorkers,

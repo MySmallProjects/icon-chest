@@ -168,5 +168,32 @@ public class ApiProcessManagerTests
         await stubProcess.WaitForExitAsync();
         Assert.True(stubProcess.HasExited);
     }
+
+    [Fact]
+    public async Task RestartAsync_HappyPath_RestartsChildProcessWithNewPort()
+    {
+        var stubPath = ResolveStubPath();
+        var manager = new ApiProcessManager(readinessTimeout: TimeSpan.FromSeconds(10));
+
+        try
+        {
+            var uri1 = await manager.StartAsync(stubPath);
+            Assert.NotNull(uri1);
+            var pid1 = manager.ProcessId;
+            Assert.True(manager.IsRunning);
+
+            var uri2 = await manager.RestartAsync(stubPath);
+            Assert.NotNull(uri2);
+            var pid2 = manager.ProcessId;
+            Assert.True(manager.IsRunning);
+
+            Assert.NotEqual(pid1, pid2);
+        }
+        finally
+        {
+            await manager.StopAsync();
+            Assert.False(manager.IsRunning);
+        }
+    }
 }
 

@@ -198,7 +198,7 @@ export function renderTipsSection() {
     el('ul', { className: 'help-tips-list' }, [
       el('li', {}, [
         el('strong', {}, 'Press / or Ctrl+F anywhere: '),
-        el('span', {}, 'Instantly focuses the filter text box or query editor from any image view.')
+        el('span', {}, 'Toggles the filter section open or closed, and focuses the filter text box or query editor.')
       ]),
       el('li', {}, [
         el('strong', {}, 'Bare Search Terms: '),

@@ -161,13 +161,20 @@ export function createYearsView() {
       return panelAContent;
     },
     onActivated: () => {
+      loadTree();
       if (typeof browser.onActivated === 'function') {
         browser.onActivated();
       }
     },
+    reload: () => {
+      loadTree();
+      browser.refresh();
+    },
     refresh: () => {
       loadTree();
       browser.refresh();
-    }
+    },
+    hasUnsavedChanges: () => browser.hasUnsavedChanges?.(),
+    getDetailsPanel: () => browser.getDetailsPanel?.()
   };
 }

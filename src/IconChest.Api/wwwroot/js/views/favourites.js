@@ -16,8 +16,13 @@ export function createFavouritesView() {
         browser.onActivated();
       }
     },
+    reload: () => {
+      browser.refresh();
+    },
     refresh: () => {
       browser.refresh();
-    }
+    },
+    hasUnsavedChanges: () => browser.hasUnsavedChanges?.(),
+    getDetailsPanel: () => browser.getDetailsPanel?.()
   };
 }

@@ -187,6 +187,69 @@ public static class TagEndpoints
         })
         .WithName("DeleteTag")
         .WithSummary("Deletes a tag and unlinks it from all images");
+
+        // 6. GET /api/tags/export
+        group.MapGet("/export", (ITagService tagService) =>
+        {
+            var doc = tagService.ExportTags();
+            return Results.Ok(doc);
+        })
+        .WithName("ExportTags")
+        .WithSummary("Exports all tag definitions and colors as a JSON document");
+
+        // 7. POST /api/tags/import
+        group.MapPost("/import", async (
+            HttpContext context,
+            ITagService tagService) =>
+        {
+            if (context.Request.ContentLength > 1024 * 1024)
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Payload Too Large",
+                    "Tag import file size exceeds the 1 MB limit.");
+            }
+
+            TagExportDocument? doc;
+            try
+            {
+                doc = await context.Request.ReadFromJsonAsync<TagExportDocument>();
+            }
+            catch (Exception ex)
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Invalid JSON",
+                    $"Malformed tag JSON file: {ex.Message}");
+            }
+
+            if (doc == null)
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Bad Request",
+                    "Tag document cannot be empty.");
+            }
+
+            try
+            {
+                var result = tagService.ImportTags(doc);
+                return Results.Ok(result);
+            }
+            catch (TagValidationException ex)
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Validation Error",
+                    ex.Message);
+            }
+        })
+        .WithName("ImportTags")
+        .WithSummary("Imports tags from a JSON document, merging case-insensitively");
     }
 }
 

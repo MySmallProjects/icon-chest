@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using IconChest.Core.Common;
+using IconChest.Core.Logging;
 using IconChest.Core.Settings;
+using Microsoft.Extensions.Logging;
 using Photino.NET;
 
 namespace IconChest.Desktop;
@@ -11,6 +13,8 @@ public sealed class DesktopApp
 {
     private readonly AppPaths _paths;
     private readonly SettingsService _settingsService;
+    private readonly AppLogging _appLogging;
+    private readonly ILogger<DesktopApp> _logger;
     private readonly SingleInstanceGuard _singleInstance;
     private readonly WindowStateService _windowStateService;
     private readonly ApiProcessManager _apiManager;
@@ -21,13 +25,16 @@ public sealed class DesktopApp
     private string? _secret;
     private int _isShuttingDown;
 
-    public DesktopApp(AppPaths? paths = null)
+    public DesktopApp(AppPaths? paths = null, AppLogging? appLogging = null)
     {
         _paths = paths ?? new AppPaths();
         _settingsService = new SettingsService(_paths);
+        _appLogging = appLogging ?? new AppLogging(LogComponent.App, _paths.DefaultLogDirectory, _settingsService.Current.LogLevel);
+        _logger = _appLogging.LoggerFactory.CreateLogger<DesktopApp>();
         _singleInstance = new SingleInstanceGuard("IconChest");
         _windowStateService = new WindowStateService(_settingsService);
-        _apiManager = new ApiProcessManager();
+        var apiLogger = _appLogging.LoggerFactory.CreateLogger("api-child");
+        _apiManager = new ApiProcessManager(apiLogger);
     }
 
     public async Task<int> RunAsync(string[] args)
@@ -48,9 +55,11 @@ public sealed class DesktopApp
             ;
 
         // 1. Single Instance Check
+        _logger.LogInformation("IconChest Desktop starting up. Current log: {LogFile}", _appLogging.CurrentLogFilePath);
         bool isPrimary = await _singleInstance.TryAcquireAsync();
         if (!isPrimary)
         {
+            _logger.LogInformation("Another instance of IconChest is already running. Signaling it to focus and exiting.");
             Console.WriteLine("Another instance of IconChest is already running. Signaling it to focus and exiting.");
             return 0;
         }
@@ -82,11 +91,13 @@ public sealed class DesktopApp
         try
         {
             // 2. Start API child process
+            _logger.LogInformation("Starting IconChest API background service...");
             Console.WriteLine("Starting IconChest API background service...");
             _secret = SecretGenerator.GenerateSecret();
             _apiUri = await _apiManager.StartAsync(secret: _secret);
             _navPolicy = new NavigationPolicy(_apiUri);
 
+            _logger.LogInformation("IconChest API ready at {Uri}", _apiUri);
             Console.WriteLine($"IconChest API ready at {_apiUri}");
 
             // 3. Browser-only mode
@@ -203,6 +214,11 @@ public sealed class DesktopApp
 
     private void HandleWebMessage(string message)
     {
+        if (string.IsNullOrWhiteSpace(message) || message.Length > 5 * 1024 * 1024)
+        {
+            return;
+        }
+
         try
         {
             using var doc = JsonDocument.Parse(message);
@@ -210,11 +226,12 @@ public sealed class DesktopApp
             if (!root.TryGetProperty("type", out var typeProp)) return;
 
             var type = typeProp.GetString();
+            var id = root.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
 
             if (type == "getSecret")
             {
                 // Deliver secret via WebMessage payload and custom event
-                var payload = JsonSerializer.Serialize(new { type = "secret", secret = _secret });
+                var payload = JsonSerializer.Serialize(new { type = "secret", id, secret = _secret });
                 _window?.SendWebMessage(payload);
             }
             else if (type == "pickFolder")
@@ -223,13 +240,68 @@ public sealed class DesktopApp
                 var pickedFolders = _window?.ShowOpenFolder();
                 var selected = (pickedFolders != null && pickedFolders.Length > 0) ? pickedFolders[0] : null;
 
-                var payload = JsonSerializer.Serialize(new { type = "folderPicked", path = selected });
+                var payload = JsonSerializer.Serialize(new { type = "folderPicked", id, path = selected });
                 _window?.SendWebMessage(payload);
+            }
+            else if (type == "pickFile")
+            {
+                var title = root.TryGetProperty("title", out var t) ? t.GetString() : "Open File";
+                var pickedFiles = _window?.ShowOpenFile(title ?? "Open File");
+                var selected = (pickedFiles != null && pickedFiles.Length > 0) ? pickedFiles[0] : null;
+
+                var payload = JsonSerializer.Serialize(new { type = "filePicked", id, path = selected });
+                _window?.SendWebMessage(payload);
+            }
+            else if (type == "pickSaveFile")
+            {
+                var title = root.TryGetProperty("title", out var t) ? t.GetString() : "Save File";
+                var defaultPath = root.TryGetProperty("defaultName", out var dn) ? dn.GetString() : "";
+                var selected = _window?.ShowSaveFile(title ?? "Save File", defaultPath ?? "");
+                if (!string.IsNullOrWhiteSpace(selected))
+                {
+                    var defaultExt = Path.GetExtension(defaultPath);
+                    if (!string.IsNullOrEmpty(defaultExt) && string.IsNullOrEmpty(Path.GetExtension(selected)))
+                    {
+                        selected += defaultExt;
+                    }
+                }
+
+                var payload = JsonSerializer.Serialize(new { type = "saveFilePicked", id, path = selected });
+                _window?.SendWebMessage(payload);
+            }
+            else if (type == "saveFile")
+            {
+                var title = root.TryGetProperty("title", out var t) ? t.GetString() : "Save File";
+                var defaultPath = root.TryGetProperty("defaultName", out var dn) ? dn.GetString() : "";
+                var content = root.TryGetProperty("content", out var c) ? c.GetString() : null;
+
+                var selected = _window?.ShowSaveFile(title ?? "Save File", defaultPath ?? "");
+                if (!string.IsNullOrWhiteSpace(selected))
+                {
+                    var defaultExt = Path.GetExtension(defaultPath);
+                    if (!string.IsNullOrEmpty(defaultExt) && string.IsNullOrEmpty(Path.GetExtension(selected)))
+                    {
+                        selected += defaultExt;
+                    }
+
+                    if (content != null)
+                    {
+                        File.WriteAllText(selected, content);
+                    }
+                }
+
+                var payload = JsonSerializer.Serialize(new { type = "fileSaved", id, path = selected });
+                _window?.SendWebMessage(payload);
+            }
+            else if (type == "restartApi")
+            {
+                _ = RestartApiAndReloadAsync();
             }
             else if (type == "logError")
             {
                 var errText = root.TryGetProperty("message", out var m) ? m.GetString() : message;
                 var stack = root.TryGetProperty("stack", out var st) ? st.GetString() : null;
+                _logger.LogError("Client error in web view: {Error}\n{Stack}", errText, stack ?? "");
                 Console.Error.WriteLine($"[Web View Error] {errText}");
                 if (!string.IsNullOrWhiteSpace(stack))
                 {
@@ -240,6 +312,23 @@ public sealed class DesktopApp
         catch (Exception ex)
         {
             Trace.TraceWarning("Failed to process web message: {0}", ex.Message);
+        }
+    }
+
+    private async Task RestartApiAndReloadAsync()
+    {
+        try
+        {
+            var newUri = await _apiManager.RestartAsync().ConfigureAwait(false);
+            _apiUri = newUri;
+            _secret = _apiManager.Secret;
+
+            // Navigate window to new URL
+            _window?.Load(new Uri($"{_apiUri}#handoff={_secret}"));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Restart Error] Failed to restart API child process: {ex.Message}");
         }
     }
 
@@ -275,7 +364,8 @@ public sealed class DesktopApp
 
     private int HandleStartupFailure(Exception ex)
     {
-        var todayLogFile = Path.Combine(_paths.DefaultLogDirectory, $"app-{DateTime.UtcNow:yyyyMMdd}.log");
+        var todayLogFile = _appLogging.CurrentLogFilePath;
+        _logger.LogError(ex, "IconChest Desktop Startup Failure: {Message}", ex.Message);
         Console.ForegroundColor = ConsoleColor.Red;
         Console.Error.WriteLine("=================================================");
         Console.Error.WriteLine("IconChest Startup Failure");
@@ -300,8 +390,17 @@ public sealed class DesktopApp
             return;
         }
 
+        _logger.LogInformation("IconChest Desktop shutting down.");
         _windowStateService.Flush();
-        await _apiManager.StopAsync();
+        try
+        {
+            await _apiManager.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error while stopping API process: {Message}", ex.Message);
+        }
         _singleInstance.Release();
+        _appLogging.Dispose();
     }
 }

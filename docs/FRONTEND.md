@@ -145,5 +145,20 @@ All algorithms that do not require DOM access are isolated into testable, data-a
 * `views/help.js`: Full-width Panel B view with sub-navigation supporting deep links (`#help/shortcuts`, `#help/query`, `#help/filters`, `#help/tips`).
 * **Keyboard Shortcuts**: `/` and `Ctrl/Cmd + F` focus the filter bar across all image views. `Enter` in Simple mode triggers Apply. `Escape` clears the focused input or dismisses focus back to the grid.
 
+---
+
+## 8. Management Pages, File Dialogs & Download Handling (Phase 10)
+
+### 8.1 File Input & Download Link Evaluation in Photino (WebKitGTK & WebView2)
+* **`<input type="file">` Evaluation:**
+  * **WebKitGTK (Linux):** Relies on WebKitGTK's internal `WebKitFileChooserRequest`. In non-sandboxed full desktop sessions, it opens a native GTK file chooser. However, file filters, title customization, and programmatic save paths cannot be controlled via HTML `<input type="file">`.
+  * **WebView2 (Windows):** Natively opens the Windows file picker dialog.
+  * **Architectural Strategy:** For desktop shell execution, native file selection is driven through the Photino message bridge (`pickFile`), which delegates directly to `PhotinoWindow.ShowOpenFile()`. In web browser mode, standard HTML `<input type="file">` is used as a transparent fallback.
+* **`<a download>` Evaluation:**
+  * **WebKitGTK (Linux):** WebKitGTK triggers the `download-requested` signal when an `<a>` with a `download` attribute is clicked. Photino.NET 4.0 does not bind or implement a default download signal handler; unhandled download signals are silently ignored or fail to prompt the user.
+  * **WebView2 (Windows):** Downloads route to the default browser downloads directory if permitted, but cannot open an interactive "Save As" dialog with suggested names directly from an anchor tag.
+  * **Architectural Strategy:** In the desktop shell, export operations (database backup, tag export) utilize the bridge `pickSaveFile` / `saveFile` commands, triggering native OS file save dialogs and atomic disk writes. In web browser mode, operations fall back to streaming endpoints (`GET /api/data/backups/{name}/download`, client-generated blob object URLs with `<a download>`).
+
+
 
 

@@ -142,7 +142,7 @@ public class DuplicateAndMissingServiceTests : IDisposable
         Assert.Equal(id, missingList.Items[0].Id);
 
         // Remove missing image record
-        var removed = _missingService.RemoveMissing(_folderId);
+        var removed = _missingService.RemoveMissing(folderId: _folderId);
         Assert.Equal(1, removed);
 
         Assert.Null(_imageRepo.GetById(id));
@@ -177,5 +177,143 @@ public class DuplicateAndMissingServiceTests : IDisposable
 
         var folderIds = _missingService.GetFolderIdsWithMissing();
         Assert.Contains(_folderId, folderIds);
+    }
+
+    [Fact]
+    public void DuplicateService_GetSummaryAndSorting()
+    {
+        // Group A: 3 copies of 100 bytes = 200 reclaimable bytes
+        var hashA = "hash_group_a_12345";
+        for (int i = 0; i < 3; i++)
+        {
+            _imageRepo.InsertBatch([new ImageRecord
+            {
+                FolderId = _folderId,
+                Path = Path.Combine(_libDir, $"a_{i}.png"),
+                PathKey = $"a_{i}",
+                DirectoryPath = _libDir,
+                FileName = $"a_{i}.png",
+                Extension = "png",
+                Format = "png",
+                Hash = hashA,
+                SizeBytes = 100,
+                Width = 10,
+                Height = 10,
+                IsDuplicate = true,
+                CreatedUtc = DateTime.UtcNow.ToString("O"),
+                ModifiedUtc = DateTime.UtcNow.ToString("O"),
+                AddedUtc = DateTime.UtcNow.ToString("O"),
+                EffectiveDateUtc = DateTime.UtcNow.ToString("O")
+            }]);
+        }
+
+        // Group B: 2 copies of 500 bytes = 500 reclaimable bytes
+        var hashB = "hash_group_b_67890";
+        for (int i = 0; i < 2; i++)
+        {
+            _imageRepo.InsertBatch([new ImageRecord
+            {
+                FolderId = _folderId,
+                Path = Path.Combine(_libDir, $"b_{i}.png"),
+                PathKey = $"b_{i}",
+                DirectoryPath = _libDir,
+                FileName = $"b_{i}.png",
+                Extension = "png",
+                Format = "png",
+                Hash = hashB,
+                SizeBytes = 500,
+                Width = 10,
+                Height = 10,
+                IsDuplicate = true,
+                CreatedUtc = DateTime.UtcNow.ToString("O"),
+                ModifiedUtc = DateTime.UtcNow.ToString("O"),
+                AddedUtc = DateTime.UtcNow.ToString("O"),
+                EffectiveDateUtc = DateTime.UtcNow.ToString("O")
+            }]);
+        }
+
+        // Summary test
+        var summary = _duplicateService.GetSummary(sort: "reclaimable", dir: "desc");
+        Assert.Equal(2, summary.GroupCount);
+        Assert.Equal(5, summary.ImageCount);
+        Assert.Equal(700, summary.ReclaimableBytes); // 200 + 500
+        Assert.Equal(2, summary.GroupSizes.Count);
+        // By reclaimable desc: Group B (500 reclaimable, 2 copies) should be first, Group A (200 reclaimable, 3 copies) second
+        Assert.Equal(2, summary.GroupSizes[0]);
+        Assert.Equal(3, summary.GroupSizes[1]);
+
+        // Test display IDs
+        var ids = _duplicateService.GetDuplicateImageIds(sort: "reclaimable", dir: "desc");
+        Assert.Equal(5, ids.Count);
+
+        // Test sort by copies desc: Group A (3 copies) first, Group B (2 copies) second
+        var copiesSummary = _duplicateService.GetSummary(sort: "copies", dir: "desc");
+        Assert.Equal(3, copiesSummary.GroupSizes[0]);
+        Assert.Equal(2, copiesSummary.GroupSizes[1]);
+    }
+
+    [Fact]
+    public void MissingService_SortingAndRemoveByIds()
+    {
+        var id1 = _imageRepo.InsertBatch([new ImageRecord
+        {
+            FolderId = _folderId,
+            Path = Path.Combine(_libDir, "zebra.png"),
+            PathKey = "zebra",
+            DirectoryPath = _libDir,
+            FileName = "zebra.png",
+            Extension = "png",
+            Format = "png",
+            Hash = "hash1",
+            SizeBytes = 1000,
+            Width = 10,
+            Height = 10,
+            IsMissing = true,
+            MissingSinceUtc = "2026-01-01T00:00:00Z",
+            CreatedUtc = DateTime.UtcNow.ToString("O"),
+            ModifiedUtc = DateTime.UtcNow.ToString("O"),
+            AddedUtc = DateTime.UtcNow.ToString("O"),
+            EffectiveDateUtc = DateTime.UtcNow.ToString("O")
+        }])[0];
+
+        var id2 = _imageRepo.InsertBatch([new ImageRecord
+        {
+            FolderId = _folderId,
+            Path = Path.Combine(_libDir, "apple.png"),
+            PathKey = "apple",
+            DirectoryPath = _libDir,
+            FileName = "apple.png",
+            Extension = "png",
+            Format = "png",
+            Hash = "hash2",
+            SizeBytes = 200,
+            Width = 10,
+            Height = 10,
+            IsMissing = true,
+            MissingSinceUtc = "2026-02-01T00:00:00Z",
+            CreatedUtc = DateTime.UtcNow.ToString("O"),
+            ModifiedUtc = DateTime.UtcNow.ToString("O"),
+            AddedUtc = DateTime.UtcNow.ToString("O"),
+            EffectiveDateUtc = DateTime.UtcNow.ToString("O")
+        }])[0];
+
+        // Sort by name ASC: apple then zebra
+        var resName = _missingService.GetMissing(sort: "name", dir: "asc");
+        Assert.Equal(2, resName.Total);
+        Assert.Equal("apple.png", resName.Items[0].FileName);
+        Assert.Equal("zebra.png", resName.Items[1].FileName);
+
+        // Sort by size DESC: zebra (1000) then apple (200)
+        var resSize = _missingService.GetMissing(sort: "size", dir: "desc");
+        Assert.Equal(1000, resSize.Items[0].SizeBytes);
+        Assert.Equal(200, resSize.Items[1].SizeBytes);
+
+        // Remove by specific ID
+        var removed = _missingService.RemoveMissing(ids: [id1]);
+        Assert.Equal(1, removed);
+
+        var remaining = _missingService.GetMissing();
+        Assert.Equal(1, remaining.Total);
+        Assert.Equal(id2, remaining.Items[0].Id);
     }
 }

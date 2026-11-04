@@ -133,13 +133,20 @@ export function createTagsView() {
       return panelAContent;
     },
     onActivated: () => {
+      loadTags();
       if (typeof browser.onActivated === 'function') {
         browser.onActivated();
       }
     },
+    reload: () => {
+      loadTags();
+      browser.refresh();
+    },
     refresh: () => {
       loadTags();
       browser.refresh();
-    }
+    },
+    hasUnsavedChanges: () => browser.hasUnsavedChanges?.(),
+    getDetailsPanel: () => browser.getDetailsPanel?.()
   };
 }

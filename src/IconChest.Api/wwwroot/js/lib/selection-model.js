@@ -38,6 +38,10 @@ export class SelectionModel {
     return Array.from(this.selectedIds);
   }
 
+  getSelectedArray() {
+    return Array.from(this.selectedIds);
+  }
+
   clear() {
     if (this.selectedIds.size === 0 && this.anchorId === null && this.focusId === null) return;
     this.selectedIds.clear();

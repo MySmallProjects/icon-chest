@@ -126,6 +126,10 @@ export class VirtualGrid {
     this.scrollEl.addEventListener('pointerdown', (e) => this._handlePointerDown(e));
   }
 
+  focus() {
+    this.scrollEl?.focus();
+  }
+
   recalculateLayout() {
     const containerWidth = Math.max(0, this.scrollEl.clientWidth - 16);
     this.totalItems = this.imageSource ? this.imageSource.total : 0;

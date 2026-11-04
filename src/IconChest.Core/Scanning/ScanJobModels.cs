@@ -25,6 +25,7 @@ public sealed class ScanJobInfo
 
 public interface IScanJobManager
 {
+    bool HasActiveScans { get; }
     ScanJobInfo StartScan(long folderId);
     IReadOnlyList<ScanJobInfo> GetRecentJobs(int limit = 20);
     ScanJobInfo? GetJob(string jobId);

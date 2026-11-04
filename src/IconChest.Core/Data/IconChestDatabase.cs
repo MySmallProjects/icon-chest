@@ -14,11 +14,13 @@ public sealed class IconChestDatabase : IIconChestDatabase
     private readonly ILogger<IconChestDatabase> _logger;
 
     public string DatabasePath => _connectionFactory.DatabasePath;
+    public int SupportedSchemaVersion => _migrationRunner.SupportedVersion;
 
     public IconChestDatabase(
         string databasePath,
         IClock? clock = null,
-        ILogger<IconChestDatabase>? logger = null)
+        ILogger<IconChestDatabase>? logger = null,
+        IDbGate? dbGate = null)
     {
         _logger = logger ?? NullLogger<IconChestDatabase>.Instance;
 
@@ -28,15 +30,16 @@ public sealed class IconChestDatabase : IIconChestDatabase
             Directory.CreateDirectory(directory);
         }
 
-        _connectionFactory = new DatabaseConnectionFactory(databasePath);
+        _connectionFactory = new DatabaseConnectionFactory(databasePath, dbGate);
         _migrationRunner = new MigrationRunner(_connectionFactory, clock);
     }
 
     public IconChestDatabase(
         ISettingsService settingsService,
         IClock? clock = null,
-        ILogger<IconChestDatabase>? logger = null)
-        : this(ResolveDatabasePath(settingsService), clock, logger)
+        ILogger<IconChestDatabase>? logger = null,
+        IDbGate? dbGate = null)
+        : this(ResolveDatabasePath(settingsService), clock, logger, dbGate)
     {
     }
 

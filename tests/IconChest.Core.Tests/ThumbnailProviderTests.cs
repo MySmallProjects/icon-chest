@@ -32,7 +32,7 @@ public class ThumbnailProviderTests
         settings.Update(s =>
         {
             s.ThumbnailCachePath = cacheDir;
-            s.ThumbnailCacheMaxMb = 1; // 1 MB max for easy eviction testing
+            s.ThumbnailCacheMaxMb = 64;
         });
 
         var db = new IconChestDatabase(settings);
@@ -260,7 +260,7 @@ public class ThumbnailProviderTests
 
             // Run Eviction: total is ~1.2 MB, max is 1.0 MB. Target is 0.90 MB (921 KB).
             // Evicting img1 (600 KB) leaves 600 KB <= 921 KB -> evicts 1 item.
-            var evicted = provider.RunEviction();
+            var evicted = provider.RunEviction(maxBytesOverride: 1024L * 1024L);
             Assert.Equal(1, evicted);
 
             var rec1 = queue.GetRecord("hash_lru_1", 64);

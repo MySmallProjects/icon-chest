@@ -12,7 +12,68 @@ public sealed class DuplicateService : IDuplicateService
         _connectionFactory = connectionFactory;
     }
 
-    public DuplicateSearchResult GetDuplicates(int offset = 0, int limit = 50)
+    private static (string OrderByClause, string NormalizedSort, string NormalizedDir) BuildSortClause(string? sort, string? dir)
+    {
+        var s = (sort ?? "reclaimable").Trim().ToLowerInvariant();
+        var d = (dir ?? "").Trim().ToLowerInvariant();
+
+        if (d != "asc" && d != "desc")
+        {
+            d = s == "name" ? "asc" : "desc";
+        }
+
+        string clause = s switch
+        {
+            "copies" => $"COUNT(*) {d.ToUpperInvariant()}, ((COUNT(*) - 1) * size_bytes) DESC, hash ASC",
+            "size" => $"size_bytes {d.ToUpperInvariant()}, COUNT(*) DESC, hash ASC",
+            "name" => $"MIN(file_name) {d.ToUpperInvariant()}, hash ASC",
+            _ => $"((COUNT(*) - 1) * size_bytes) {d.ToUpperInvariant()}, size_bytes DESC, hash ASC"
+        };
+
+        return (clause, s, d);
+    }
+
+    public DuplicateSummaryResult GetSummary(string? sort = null, string? dir = null)
+    {
+        var (orderByClause, _, _) = BuildSortClause(sort, dir);
+
+        using var conn = _connectionFactory.CreateAndOpenConnection();
+
+        string sql = $@"
+            SELECT hash,
+                   size_bytes,
+                   COUNT(*) AS copies,
+                   ((COUNT(*) - 1) * size_bytes) AS reclaimable
+            FROM image
+            WHERE is_hidden = 0 AND is_missing = 0 AND size_bytes > 0
+            GROUP BY hash, size_bytes
+            HAVING COUNT(*) > 1
+            ORDER BY {orderByClause}
+            LIMIT 200000;";
+
+        var rows = conn.Query<(string Hash, long SizeBytes, int Copies, long Reclaimable)>(sql).ToList();
+
+        long imageCount = 0;
+        long reclaimableBytes = 0;
+        var groupSizes = new List<int>(rows.Count);
+
+        foreach (var r in rows)
+        {
+            imageCount += r.Copies;
+            reclaimableBytes += r.Reclaimable;
+            groupSizes.Add(r.Copies);
+        }
+
+        return new DuplicateSummaryResult
+        {
+            GroupCount = rows.Count,
+            ImageCount = imageCount,
+            ReclaimableBytes = reclaimableBytes,
+            GroupSizes = groupSizes
+        };
+    }
+
+    public DuplicateSearchResult GetDuplicates(int offset = 0, int limit = 50, string? sort = null, string? dir = null)
     {
         var clampedLimit = Math.Clamp(limit, 1, 500);
         var clampedOffset = Math.Max(0, offset);
@@ -41,14 +102,16 @@ public sealed class DuplicateService : IDuplicateService
             };
         }
 
-        // 2. Fetch page of groups
-        const string pagedGroupsSql = @"
+        // 2. Fetch page of groups in requested sort order
+        var (orderByClause, _, _) = BuildSortClause(sort, dir);
+
+        string pagedGroupsSql = $@"
             SELECT hash AS Hash, size_bytes AS SizeBytes
             FROM image
             WHERE is_hidden = 0 AND is_missing = 0 AND size_bytes > 0
             GROUP BY hash, size_bytes
             HAVING COUNT(*) > 1
-            ORDER BY hash ASC
+            ORDER BY {orderByClause}
             LIMIT @limit OFFSET @offset;";
 
         var groups = conn.Query<(string Hash, long SizeBytes)>(
@@ -146,9 +209,59 @@ public sealed class DuplicateService : IDuplicateService
         };
     }
 
+    public IReadOnlyList<long> GetDuplicateImageIds(string? sort = null, string? dir = null, int limit = 200_000)
+    {
+        var clampedLimit = Math.Clamp(limit, 1, 200_000);
+        var (orderByClause, _, _) = BuildSortClause(sort, dir);
+
+        using var conn = _connectionFactory.CreateAndOpenConnection();
+
+        // Retrieve the ordered groups
+        string orderedGroupsSql = $@"
+            SELECT hash, size_bytes
+            FROM image
+            WHERE is_hidden = 0 AND is_missing = 0 AND size_bytes > 0
+            GROUP BY hash, size_bytes
+            HAVING COUNT(*) > 1
+            ORDER BY {orderByClause}
+            LIMIT 200000;";
+
+        var groups = conn.Query<(string Hash, long SizeBytes)>(orderedGroupsSql).ToList();
+        if (groups.Count == 0)
+        {
+            return Array.Empty<long>();
+        }
+
+        var hashes = groups.Select(g => g.Hash).Distinct().ToList();
+
+        // Fetch image ids and hashes ordered by path
+        const string imagesSql = @"
+            SELECT id, hash, size_bytes
+            FROM image
+            WHERE is_hidden = 0 AND is_missing = 0 AND hash IN @hashes
+            ORDER BY path ASC;";
+
+        var images = conn.Query<(long Id, string Hash, long SizeBytes)>(imagesSql, new { hashes }).ToList();
+        var imagesLookup = images.ToLookup(x => (x.Hash, x.SizeBytes), x => x.Id);
+
+        var resultIds = new List<long>(Math.Min(images.Count, clampedLimit));
+        foreach (var grp in groups)
+        {
+            foreach (var imgId in imagesLookup[grp])
+            {
+                resultIds.Add(imgId);
+                if (resultIds.Count >= clampedLimit)
+                {
+                    return resultIds;
+                }
+            }
+        }
+
+        return resultIds;
+    }
+
     private sealed class DuplicateItemWithHash : DuplicateGroupItem
     {
         public string Hash { get; set; } = string.Empty;
     }
 }
-

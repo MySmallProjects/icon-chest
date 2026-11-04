@@ -303,6 +303,29 @@ ICONCHEST_CONFIG_DIR=/tmp/test-config ICONCHEST_DATA_DIR=/tmp/test-data ./src/Ic
 
 ---
 
+## Library Management & Data Maintenance
+
+### Database Backups & Snapshots
+IconChest supports safe, non-blocking online database backups using SQLite's online backup API:
+* **Online Backup:** Snapshots are consistent and safe to generate while the app is active and writes or scans are in progress.
+* **Storage Location:** Backups are saved to the designated backups directory (defaults to `<data>/backups`).
+* **Validation & Inspection:** Prior to any restoration, backup files undergo integrity verification (`PRAGMA integrity_check`), table structure validation, and schema version checking.
+* **Safe Restore with Auto-Rollback:** Restoring an existing backup automatically creates a `<name>.pre-restore-<timestamp>` safety copy of the current database before swapping. If any error occurs during the swap or migration, IconChest automatically rolls back to the previous database file without data loss.
+* **Moving the Database:** Moving the database verifies target integrity and record counts, updates `dbPath` in settings, and renames the old file to `<name>.old-<timestamp>` (or deletes it only if explicitly requested). Neither databases, backups, nor thumbnail caches may ever be located inside library folders.
+
+### Local Area Network (LAN) Access
+IconChest can be accessed from other devices across your local network:
+* **Password Requirement:** LAN access cannot be toggled on without a configured LAN password (minimum 8 characters, hashed using PBKDF2-SHA256 with 600,000+ iterations).
+* **Port Preference:** Users can specify a fixed listening port preference (1024-65535) or leave it set to `0` for dynamic port allocation.
+* **Security Notice:** HTTP transmission over standard LAN connections is unencrypted. When exposing IconChest across untrusted networks, place the service behind a reverse proxy (such as Caddy or Nginx) providing TLS/HTTPS encryption.
+
+### Tag Taxonomy Import & Export
+Tags and their assigned color swatches can be exported to JSON (`/api/tags/export`) and imported into another library (`/api/tags/import`):
+* Merge strategy: Existing tag colors are preserved; new tags are created; case-insensitive name matching is applied.
+* Safety limit: Tag import files are restricted to 1 MB and a maximum of 10,000 tags.
+
+---
+
 ## Security & Privacy: No Logging of Secrets
 
 A core architectural invariant of IconChest:

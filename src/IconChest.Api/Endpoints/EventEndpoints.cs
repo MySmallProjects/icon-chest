@@ -67,6 +67,11 @@ public static class EventEndpoints
                 _ = SendEventAsync("library.changed", "{}");
             };
 
+            Action onDataReloaded = () =>
+            {
+                _ = SendEventAsync("data.reloaded", "{}");
+            };
+
             Action<object> onScanProgress = (prog) =>
             {
                 string json = JsonSerializer.Serialize(prog);
@@ -80,6 +85,7 @@ public static class EventEndpoints
             };
 
             eventEmitter.LibraryChanged += onLibraryChanged;
+            eventEmitter.DataReloaded += onDataReloaded;
             eventEmitter.ScanProgress += onScanProgress;
             eventEmitter.ScanCompleted += onScanCompleted;
 
@@ -131,6 +137,7 @@ public static class EventEndpoints
             finally
             {
                 eventEmitter.LibraryChanged -= onLibraryChanged;
+                eventEmitter.DataReloaded -= onDataReloaded;
                 eventEmitter.ScanProgress -= onScanProgress;
                 eventEmitter.ScanCompleted -= onScanCompleted;
             }

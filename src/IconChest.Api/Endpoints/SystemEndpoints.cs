@@ -44,6 +44,31 @@ public static class SystemEndpoints
             var paths = settingsService.Paths;
             var todayLogFile = Path.Combine(paths.DefaultLogDirectory, $"app-{DateTime.UtcNow:yyyyMMdd}.log");
 
+            var lanUrls = new List<string>();
+            if (settingsService.Current.Api.AllowLan)
+            {
+                try
+                {
+                    var hostName = System.Net.Dns.GetHostName();
+                    var hostEntry = System.Net.Dns.GetHostEntry(hostName);
+                    foreach (var ip in hostEntry.AddressList)
+                    {
+                        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(ip))
+                        {
+                            lanUrls.Add($"http://{ip}:{boundPort}");
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fallback
+                }
+            }
+
+            bool canRestart = Environment.GetEnvironmentVariable("ICONCHEST_DESKTOP") == "1" ||
+                              Environment.GetEnvironmentVariable("ICONCHEST_CAN_RESTART") == "1" ||
+                              !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ICONCHEST_API_SECRET"));
+
             return Results.Ok(new
             {
                 version = versionInfo.Version,
@@ -56,7 +81,9 @@ public static class SystemEndpoints
                 dbPath = database.DatabasePath,
                 schemaVersion = database.GetSchemaVersion(),
                 hashAlgorithm = "xxh128",
-                isLocal = context.IsLoopback()
+                isLocal = context.IsLoopback(),
+                lanUrls = lanUrls,
+                canRestart = canRestart
             });
         })
         .WithName("GetSystemInfo")

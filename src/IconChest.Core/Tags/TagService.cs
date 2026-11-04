@@ -1,6 +1,10 @@
 using System.Text.RegularExpressions;
 using Dapper;
+using IconChest.Core.Common;
 using IconChest.Core.Data;
+using IconChest.Core.Events;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace IconChest.Core.Tags;
 
@@ -11,6 +15,8 @@ public interface ITagService
     TagRecord Create(string name, string? fgColor = null, string? bgColor = null);
     TagRecord Update(long id, string? name = null, string? fgColor = null, string? bgColor = null);
     bool Delete(long id);
+    TagExportDocument ExportTags();
+    TagImportResult ImportTags(TagExportDocument document);
 }
 
 public sealed partial class TagService : ITagService
@@ -20,10 +26,20 @@ public sealed partial class TagService : ITagService
     private const string DefaultBgColor = "#4A5568";
 
     private readonly IDatabaseConnectionFactory _connectionFactory;
+    private readonly ILibraryEventEmitter? _eventEmitter;
+    private readonly IClock _clock;
+    private readonly ILogger<TagService> _logger;
 
-    public TagService(IDatabaseConnectionFactory connectionFactory)
+    public TagService(
+        IDatabaseConnectionFactory connectionFactory,
+        ILibraryEventEmitter? eventEmitter = null,
+        IClock? clock = null,
+        ILogger<TagService>? logger = null)
     {
         _connectionFactory = connectionFactory;
+        _eventEmitter = eventEmitter;
+        _clock = clock ?? SystemClock.Instance;
+        _logger = logger ?? NullLogger<TagService>.Instance;
     }
 
     public IReadOnlyList<TagRecord> GetAll()
@@ -148,6 +164,135 @@ public sealed partial class TagService : ITagService
         }
     }
 
+    public TagExportDocument ExportTags()
+    {
+        var allTags = GetAll();
+        var items = allTags.Select(t => new TagExportItem(t.Name, t.FgColor, t.BgColor)).ToList();
+
+        return new TagExportDocument(
+            Format: "iconchest-tags",
+            Version: 1,
+            ExportedUtc: _clock.UtcNow.ToString("O"),
+            Tags: items);
+    }
+
+    public TagImportResult ImportTags(TagExportDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        if (!string.Equals(document.Format, "iconchest-tags", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new TagValidationException($"Invalid tag document format '{document.Format}'. Expected 'iconchest-tags'.");
+        }
+
+        if (document.Version > 1)
+        {
+            throw new TagValidationException($"Unsupported tag file version: {document.Version}. Supported version is 1.");
+        }
+
+        if (document.Tags != null && document.Tags.Count > 10000)
+        {
+            throw new TagValidationException("Tag document contains more than the maximum allowed 10,000 tags.");
+        }
+
+        if (document.Tags == null || document.Tags.Count == 0)
+        {
+            return new TagImportResult(0, 0, 0, 0, Array.Empty<string>());
+        }
+
+        using var conn = _connectionFactory.CreateAndOpenConnection();
+
+        // 1. Existing tags from DB (case-insensitive name match)
+        var existingNames = conn.Query<string>("SELECT name FROM tag;")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var seenInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var toInsert = new List<TagInsertItem>();
+        var errors = new List<string>();
+
+        int addedCount = 0;
+        int skippedCount = 0;
+        int duplicateInFileCount = 0;
+        int invalidCount = 0;
+
+        foreach (var item in document.Tags)
+        {
+            if (string.IsNullOrWhiteSpace(item.Name))
+            {
+                invalidCount++;
+                if (errors.Count < 50) errors.Add("Tag name is empty or missing.");
+                continue;
+            }
+
+            var trimmedName = item.Name.Trim();
+
+            // Check duplicate in file
+            if (!seenInFile.Add(trimmedName))
+            {
+                duplicateInFileCount++;
+                continue;
+            }
+
+            // Validate name rules
+            if (trimmedName.Length is < 1 or > 50 || trimmedName.Any(char.IsControl))
+            {
+                invalidCount++;
+                if (errors.Count < 50) errors.Add($"Tag '{trimmedName}' has an invalid name (length {trimmedName.Length} or control characters).");
+                continue;
+            }
+
+            // Validate color rules
+            string fg;
+            string bg;
+            try
+            {
+                fg = ValidateColor(item.FgColor, DefaultFgColor);
+                bg = ValidateColor(item.BgColor, DefaultBgColor);
+            }
+            catch (TagValidationException ex)
+            {
+                invalidCount++;
+                if (errors.Count < 50) errors.Add($"Tag '{trimmedName}': {ex.Message}");
+                continue;
+            }
+
+            // Check if existing tag wins
+            if (existingNames.Contains(trimmedName))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            // Valid new tag
+            toInsert.Add(new TagInsertItem(trimmedName, fg, bg));
+            existingNames.Add(trimmedName);
+            addedCount++;
+        }
+
+        if (toInsert.Count > 0)
+        {
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                const string insertSql = "INSERT INTO tag (name, fg_color, bg_color) VALUES (@Name, @FgColor, @BgColor);";
+                conn.Execute(insertSql, toInsert, transaction: tx);
+                tx.Commit();
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+
+            _eventEmitter?.EmitLibraryChanged();
+        }
+
+        _logger.LogInformation("Tag import finished. Added: {Added}, Skipped: {Skipped}, Duplicates in file: {Duplicates}, Invalid: {Invalid}.",
+            addedCount, skippedCount, duplicateInFileCount, invalidCount);
+
+        return new TagImportResult(addedCount, skippedCount, duplicateInFileCount, invalidCount, errors);
+    }
+
     private static string ValidateTagName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -184,5 +329,7 @@ public sealed partial class TagService : ITagService
 
         return trimmed.ToUpperInvariant();
     }
+
+    private sealed record TagInsertItem(string Name, string FgColor, string BgColor);
 }
 

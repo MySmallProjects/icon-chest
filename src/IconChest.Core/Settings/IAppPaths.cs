@@ -8,6 +8,7 @@ public interface IAppPaths
     string CorruptSettingsFilePath { get; }
     string DefaultDatabasePath { get; }
     string DefaultThumbnailCachePath { get; }
+    string DefaultBackupDirectory { get; }
     string DefaultLogDirectory { get; }
 }
 

@@ -218,6 +218,16 @@ public sealed class ApiProcessManager : IAsyncDisposable
         return _apiUri;
     }
 
+    public async Task<Uri> RestartAsync(
+        string? explicitApiPath = null,
+        string? secret = null,
+        IDictionary<string, string>? environmentVariables = null,
+        CancellationToken cancellationToken = default)
+    {
+        await StopAsync().ConfigureAwait(false);
+        return await StartAsync(explicitApiPath, secret, environmentVariables, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task StopAsync()
     {
         await _stopLock.WaitAsync();

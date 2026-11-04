@@ -8,7 +8,8 @@ using Microsoft.AspNetCore.Routing;
 namespace IconChest.Api.Endpoints;
 
 public sealed record RemoveMissingRequest(
-    [property: JsonPropertyName("folderId")] long? FolderId);
+    [property: JsonPropertyName("ids")] IReadOnlyList<long>? Ids = null,
+    [property: JsonPropertyName("folderId")] long? FolderId = null);
 
 public static class MissingEndpoints
 {
@@ -20,9 +21,11 @@ public static class MissingEndpoints
         group.MapGet("/", (
             IMissingService missingService,
             int? offset,
-            int? limit) =>
+            int? limit,
+            string? sort,
+            string? dir) =>
         {
-            var result = missingService.GetMissing(offset ?? 0, limit ?? 50);
+            var result = missingService.GetMissing(offset ?? 0, limit ?? 50, sort, dir);
             return Results.Ok(new
             {
                 total = result.Total,
@@ -39,7 +42,7 @@ public static class MissingEndpoints
             RemoveMissingRequest? request,
             IMissingService missingService) =>
         {
-            int count = missingService.RemoveMissing(request?.FolderId);
+            int count = missingService.RemoveMissing(request?.Ids, request?.FolderId);
             return Results.Ok(new
             {
                 removedCount = count
@@ -74,10 +77,13 @@ public static class MissingEndpoints
                 }
             }
 
-            return Results.Accepted("/api/scans", new { jobs = startedJobs });
+            return Results.Ok(new
+            {
+                startedCount = startedJobs.Count,
+                jobs = startedJobs
+            });
         })
         .WithName("RescanMissingFolders")
-        .WithSummary("Starts scans for library folders containing missing images");
+        .WithSummary("Triggers rescanning for all library folders containing missing images");
     }
 }
-

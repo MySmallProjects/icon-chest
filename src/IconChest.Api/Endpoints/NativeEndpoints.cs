@@ -14,6 +14,12 @@ public sealed class OpenFileRequest
     public long ImageId { get; set; }
 }
 
+public sealed class OpenFolderRequest
+{
+    [JsonPropertyName("target")]
+    public string? Target { get; set; }
+}
+
 public static class NativeEndpoints
 {
     public static void MapNativeEndpoints(this IEndpointRouteBuilder app)
@@ -62,6 +68,62 @@ public static class NativeEndpoints
         })
         .WithName("OpenImageInNativeViewer")
         .WithSummary("Opens the image file in the host operating system's default viewer (loopback only)");
+
+        group.MapPost("/open-folder", (
+            HttpContext context,
+            OpenFolderRequest? request,
+            IconChest.Core.Settings.ISettingsService settingsService,
+            INativeLauncher launcher) =>
+        {
+            if (!context.IsLoopback())
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status403Forbidden,
+                    "Forbidden",
+                    "Native folder opening is only allowed from local loopback requests.");
+            }
+
+            string? targetDir = request?.Target?.Trim().ToLowerInvariant() switch
+            {
+                "logs" => settingsService.Paths.DefaultLogDirectory,
+                "backups" => !string.IsNullOrWhiteSpace(settingsService.Current.BackupFolder) ? settingsService.Current.BackupFolder : settingsService.Paths.DefaultBackupDirectory,
+                "thumbnails" => !string.IsNullOrWhiteSpace(settingsService.Current.ThumbnailCachePath) ? settingsService.Current.ThumbnailCachePath : settingsService.Paths.DefaultThumbnailCachePath,
+                "data" => settingsService.Paths.DataDirectory,
+                _ => null
+            };
+
+            if (targetDir == null)
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Bad Request",
+                    "Target must be one of: logs, backups, thumbnails, data.");
+            }
+
+            try
+            {
+                Directory.CreateDirectory(targetDir);
+                launcher.OpenFile(targetDir);
+                return Results.Ok(new
+                {
+                    status = "opened",
+                    target = request!.Target,
+                    path = targetDir
+                });
+            }
+            catch (Exception ex)
+            {
+                return EndpointHelpers.ProblemDetails(
+                    context,
+                    StatusCodes.Status500InternalServerError,
+                    "Launch Error",
+                    $"Failed to open folder: {ex.Message}");
+            }
+        })
+        .WithName("OpenFolderInNativeExplorer")
+        .WithSummary("Opens a whitelisted system folder in the native file manager (loopback only)");
     }
 }
 

@@ -696,7 +696,7 @@ public static class ImageEndpoints
         {
             "include" => InclusionState.Include,
             "exclude" => InclusionState.Exclude,
-            "only" => InclusionState.Only,
+            "only" or "true" or "1" => InclusionState.Only,
             _ => fallback
         };
     }

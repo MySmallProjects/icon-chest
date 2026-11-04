@@ -34,6 +34,8 @@ public sealed class ScanJobManager : IScanJobManager
         _logger = logger ?? NullLogger<ScanJobManager>.Instance;
     }
 
+    public bool HasActiveScans => !_activeJobs.IsEmpty;
+
     public ScanJobInfo StartScan(long folderId)
     {
         var job = new ScanJobInfo

@@ -11,6 +11,7 @@ public sealed class AppPaths : IAppPaths
     public string CorruptSettingsFilePath => Path.Combine(ConfigDirectory, "settings.json.corrupt");
     public string DefaultDatabasePath => Path.Combine(DataDirectory, "iconchest.db");
     public string DefaultThumbnailCachePath => Path.Combine(DataDirectory, "thumbnails");
+    public string DefaultBackupDirectory => Path.Combine(DataDirectory, "backups");
     public string DefaultLogDirectory => Path.Combine(DataDirectory, "logs");
 
     public AppPaths(

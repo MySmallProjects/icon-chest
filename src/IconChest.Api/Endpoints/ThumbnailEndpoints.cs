@@ -100,5 +100,24 @@ public static class ThumbnailEndpoints
         })
         .WithName("ClearThumbnailCache")
         .WithSummary("Clears all cached thumbnail files and resets queue records (requires confirmation)");
+
+        // 5. POST /api/thumbnails/cleanup-orphans
+        group.MapPost("/cleanup-orphans", (
+            IThumbnailProvider provider) =>
+        {
+            int count = provider.CleanupOrphans();
+            return Results.Ok(new
+            {
+                cleanedCount = count
+            });
+        })
+        .WithName("CleanupThumbnailOrphans")
+        .WithSummary("Cleans up orphaned thumbnail files and records for deleted or missing images");
+
+        // 6. GET /api/thumbnails/{id} -> forward to /api/images/{id}/thumbnail
+        group.MapGet("/{id:long}", (long id, int? size) =>
+            Results.Redirect($"/api/images/{id}/thumbnail?size={size ?? 128}", permanent: false))
+        .WithName("GetThumbnailByIdFallback")
+        .WithSummary("Redirects to image thumbnail endpoint");
     }
 }

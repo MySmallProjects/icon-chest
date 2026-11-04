@@ -136,12 +136,11 @@ public sealed class ThumbnailProvider : IThumbnailProvider
         }
     }
 
-    public int RunEviction()
+    public int RunEviction(long? maxBytesOverride = null)
     {
         int maxMb = _settingsService.Current.ThumbnailCacheMaxMb;
-        if (maxMb <= 0) return 0;
-
-        long maxBytes = (long)maxMb * 1024 * 1024;
+        long maxBytes = maxBytesOverride ?? ((long)maxMb * 1024L * 1024L);
+        if (maxBytes <= 0) return 0;
         long currentBytes = _cache.GetTotalBytes();
         if (currentBytes <= maxBytes) return 0;
 

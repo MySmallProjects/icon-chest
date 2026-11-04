@@ -317,5 +317,75 @@ public class SettingsTests
             if (parent != null && Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData(63)]
+    [InlineData(1048577)]
+    public void Validation_CacheSizeBounds_Throws(int mb)
+    {
+        var settings = new AppSettings { ThumbnailCacheMaxMb = mb };
+        Assert.Throws<ArgumentOutOfRangeException>(() => settings.Validate());
+    }
+
+    [Theory]
+    [InlineData(33)]
+    [InlineData(-1)]
+    public void Validation_WorkerBounds_Throws(int workers)
+    {
+        var settings = new AppSettings { ScanWorkers = workers };
+        Assert.Throws<ArgumentOutOfRangeException>(() => settings.Validate());
+
+        var settings2 = new AppSettings { ThumbnailWorkers = workers };
+        Assert.Throws<ArgumentOutOfRangeException>(() => settings2.Validate());
+    }
+
+    [Theory]
+    [InlineData(80)]
+    [InlineData(443)]
+    [InlineData(1023)]
+    [InlineData(65536)]
+    public void Validation_PortPreference_ThrowsForPrivilegedOrTooLarge(int port)
+    {
+        var settings = new AppSettings { Api = new ApiSettings { PortPreference = port } };
+        Assert.Throws<ArgumentOutOfRangeException>(() => settings.Validate());
+    }
+
+    [Fact]
+    public void Validation_AllowLanWithoutPassword_Throws()
+    {
+        var settings = new AppSettings
+        {
+            Api = new ApiSettings { AllowLan = true, LanPasswordHash = null }
+        };
+        Assert.Throws<InvalidOperationException>(() => settings.Validate());
+
+        settings.Api.LanPasswordHash = "valid-hash-123";
+        settings.Validate(); // Does not throw
+    }
+
+    [Fact]
+    public void Validation_PathsInsideLibraryFolders_Throws()
+    {
+        var libPath = Path.Combine(Path.GetTempPath(), "my-library-folder");
+        var libFolders = new[] { libPath };
+
+        var settings = new AppSettings
+        {
+            DbPath = Path.Combine(libPath, "database.db")
+        };
+        Assert.Throws<ArgumentException>(() => settings.Validate(libFolders));
+
+        var settings2 = new AppSettings
+        {
+            ThumbnailCachePath = Path.Combine(libPath, "thumbs")
+        };
+        Assert.Throws<ArgumentException>(() => settings2.Validate(libFolders));
+
+        var settings3 = new AppSettings
+        {
+            BackupFolder = Path.Combine(libPath, "backups")
+        };
+        Assert.Throws<ArgumentException>(() => settings3.Validate(libFolders));
+    }
 }
 

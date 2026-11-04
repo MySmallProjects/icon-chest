@@ -1057,4 +1057,175 @@ public class FrontEndUnitTests
             await browser.DisposeAsync();
         }
     }
+
+    [Theory]
+    [InlineData("chromium")]
+    public async Task JavaScriptModules_GroupedGeometry_BuildsLayoutAndNavigates(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const {
+                        buildGroupLayout,
+                        getItemPosition,
+                        getVisibleGroupedRange,
+                        getAdjacentItemIndex
+                    } = await import('/js/lib/grouped-geometry.js');
+
+                    // Group 0: 3 items (2 cols => 2 rows)
+                    // Group 1: 5 items (2 cols => 3 rows)
+                    // Group 2: 2 items (2 cols => 1 row)
+                    const groupSizes = [3, 5, 2];
+                    const colCount = 2;
+                    const cellW = 100;
+                    const cellH = 100;
+                    const options = { gap: 10, headerHeight: 30, groupGap: 20 };
+
+                    const layout = buildGroupLayout(groupSizes, colCount, cellW, cellH, options);
+
+                    if (layout.totalItems !== 10) return false;
+                    if (layout.groups.length !== 3) return false;
+
+                    // Group 0: 2 rows -> height: 30 + 10 + (2 * 100 + 10) = 250
+                    // Group 1: 3 rows -> height: 30 + 10 + (3 * 100 + 20) = 360
+                    // Group 2: 1 row  -> height: 30 + 10 + 100 = 140
+                    const g0 = layout.groups[0];
+                    const g1 = layout.groups[1];
+                    const g2 = layout.groups[2];
+
+                    if (g0.y !== 0) return false;
+                    if (g1.y !== g0.height + options.groupGap) return false;
+                    if (g2.y !== g1.y + g1.height + options.groupGap) return false;
+
+                    // Test getItemPosition
+                    // Item 0: group 0, row 0, col 0
+                    const p0 = getItemPosition(layout, 0);
+                    if (p0.groupIndex !== 0 || p0.rowInGroup !== 0 || p0.colInGroup !== 0) return false;
+
+                    // Item 3: group 1, row 0, col 0
+                    const p3 = getItemPosition(layout, 3);
+                    if (p3.groupIndex !== 1 || p3.rowInGroup !== 0 || p3.colInGroup !== 0) return false;
+
+                    // Navigation across group boundary
+                    // Item 2 is group 0, row 1, col 0. Down should move to group 1, row 0, col 0 (Item 3)
+                    const nextDown = getAdjacentItemIndex(layout, 2, 'down');
+                    if (nextDown !== 3) return false;
+
+                    // Item 3 is group 1, row 0, col 0. Up should move to group 0, last row (row 1, col 0 => Item 2)
+                    const nextUp = getAdjacentItemIndex(layout, 3, 'up');
+                    if (nextUp !== 2) return false;
+
+                    // Visible range
+                    const visible = getVisibleGroupedRange(layout, 0, 300);
+                    if (visible.visibleGroups.length === 0) return false;
+
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("chromium")]
+    public async Task JavaScriptModules_DuplicatesAndMissingViews_RenderWithoutErrors(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+
+            var result = await page.EvaluateAsync<bool>(@"
+                async () => {
+                    const { createDuplicatesView } = await import('/js/views/duplicates.js');
+                    const { createMissingView } = await import('/js/views/missing.js');
+                    const { renderPerformanceSection } = await import('/js/settings/performance.js');
+                    const { renderCleanupSection } = await import('/js/settings/cleanup.js');
+                    const { renderLoggingSection } = await import('/js/settings/logging.js');
+                    const { renderApiSection } = await import('/js/settings/api.js');
+                    const { renderDataSection } = await import('/js/settings/data.js');
+
+                    const dupView = createDuplicatesView();
+                    if (!dupView.element || !dupView.element.classList.contains('duplicates-view')) return false;
+
+                    const missingView = createMissingView();
+                    if (!missingView.element || !missingView.element.classList.contains('missing-view')) return false;
+
+                    const perf = renderPerformanceSection();
+                    const clean = renderCleanupSection();
+                    const log = renderLoggingSection();
+                    const apiSec = renderApiSection();
+                    const dataSec = renderDataSection();
+
+                    if (!perf || !clean || !log || !apiSec || !dataSec) return false;
+
+                    return true;
+                }
+            ");
+
+            Assert.True(result);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("chromium")]
+    public async Task JavaScriptModules_ClientErrorLogging_ForwardsConsoleErrorToApi(string browserType)
+    {
+        var (browser, skipReason) = await _fixture.TryLaunchBrowserAsync(browserType);
+        if (browser == null)
+        {
+            Assert.True(true, $"Skipped: {skipReason}");
+            return;
+        }
+
+        try
+        {
+            var page = await browser.NewPageAsync();
+            var logRequestCaptured = false;
+            page.Request += (_, req) =>
+            {
+                if (req.Url.Contains("/api/system/client-log") && req.Method == "POST")
+                {
+                    logRequestCaptured = true;
+                }
+            };
+
+            await page.GotoAsync(_fixture.ApiUri.ToString());
+            await page.EvaluateAsync("() => console.error('Test client error message', new Error('Something broke'))");
+            await Task.Delay(500);
+
+            Assert.True(logRequestCaptured);
+        }
+        finally
+        {
+            await browser.DisposeAsync();
+        }
+    }
 }
